@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Enums\Availability;
 use App\Enums\SchedulingRoundStatus;
+use App\Mail\AdminParticipantSubscribedMail;
 use App\Mail\NewPollOpenedMail;
 use App\Mail\NewProposedDateMail;
 use App\Mail\ParticipantWelcomeMail;
@@ -47,6 +48,7 @@ class PokerSchedulingService
         );
 
         Mail::to($participant->email)->send(new ParticipantWelcomeMail($participant));
+        Mail::to(config('mail.from.address'))->send(new AdminParticipantSubscribedMail($participant));
 
         $this->brevoContacts->syncParticipant($participant);
 

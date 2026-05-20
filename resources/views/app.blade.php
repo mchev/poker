@@ -40,6 +40,10 @@
         <x-inertia::head>
             <title>{{ config('app.name', 'Laravel') }}</title>
         </x-inertia::head>
+
+        @production
+            <script defer src="https://stats.pegase.io/script.js" data-website-id="f0efbdda-3c10-4d10-838c-71d72572b5cb"></script>
+        @endproduction
     </head>
     <body class="font-sans antialiased">
         <x-inertia::app />

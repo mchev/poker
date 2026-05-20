@@ -2,6 +2,7 @@
 
 use App\Enums\Availability;
 use App\Enums\SchedulingRoundStatus;
+use App\Mail\AdminParticipantSubscribedMail;
 use App\Mail\NewPollOpenedMail;
 use App\Mail\NewProposedDateMail;
 use App\Mail\ParticipantWelcomeMail;
@@ -105,6 +106,7 @@ test('history page shows an empty state when no nights are completed', function 
 
 test('participants can subscribe and receive a personal link', function () {
     Mail::fake();
+    config(['mail.from.address' => 'admin@example.com']);
 
     $response = $this->post(route('poker.subscribe'), [
         'name' => 'Alex',
@@ -119,6 +121,7 @@ test('participants can subscribe and receive a personal link', function () {
     $response->assertRedirect(route('home', ['token' => $participant->token]));
 
     Mail::assertSent(ParticipantWelcomeMail::class, fn ($mail) => $mail->hasTo('alex@example.com'));
+    Mail::assertSent(AdminParticipantSubscribedMail::class, fn ($mail) => $mail->hasTo('admin@example.com'));
 });
 
 test('participants receive an email when a new date is proposed', function () {
