@@ -22,7 +22,7 @@ class TournamentConfirmedMail extends Mailable
     public function envelope(): Envelope
     {
         return new Envelope(
-            subject: 'On a une date ! Prochaine soirée poker',
+            subject: 'C’est calé ! Prochaine Poker party',
         );
     }
 

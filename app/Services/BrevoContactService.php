@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Participant;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -34,12 +35,20 @@ class BrevoContactService
                     'updateEnabled' => true,
                 ])
                 ->throw();
-        } catch (RequestException $exception) {
+        } catch (RequestException|ConnectionException $exception) {
+            $status = $exception instanceof RequestException
+                ? $exception->response?->status()
+                : null;
+
+            $body = $exception instanceof RequestException
+                ? $exception->response?->json()
+                : null;
+
             Log::warning('Brevo contact sync failed.', [
                 'participant_id' => $participant->id,
                 'email' => $participant->email,
-                'status' => $exception->response?->status(),
-                'body' => $exception->response?->json(),
+                'status' => $status,
+                'body' => $body,
             ]);
         }
     }

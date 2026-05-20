@@ -1,20 +1,15 @@
 <x-mail::message>
 # Salut {{ $name }} !
 
-Bonne nouvelle : **c’est calé**.
+{{ $proposedByName }} vient d’ajouter un nouveau créneau au sondage :
 
-**Quand :** {{ $dateLabel }}
-
-@if ($location)
-**Où :** {{ $location }}
-@endif
-
-Tu viens à cette Poker party ?
+**{{ $dateLabel }}**
 
 <x-mail::button :url="$url">
-Je réponds
+Voir / voter
 </x-mail::button>
 
 À bientôt autour de la table,<br>
 {{ config('app.name') }}
 </x-mail::message>
+

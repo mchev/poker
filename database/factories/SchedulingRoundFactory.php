@@ -30,4 +30,11 @@ class SchedulingRoundFactory extends Factory
             'status' => SchedulingRoundStatus::Confirmed,
         ]);
     }
+
+    public function completed(): static
+    {
+        return $this->state(fn () => [
+            'status' => SchedulingRoundStatus::Completed,
+        ]);
+    }
 }

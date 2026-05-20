@@ -6,6 +6,7 @@ use Illuminate\Support\Facades\Route;
 
 Route::middleware(ResolvePokerParticipant::class)->group(function (): void {
     Route::get('/', [PokerController::class, 'index'])->name('home');
+    Route::get('/historique', [PokerController::class, 'history'])->name('poker.history');
     Route::post('/inscription', [PokerController::class, 'subscribe'])
         ->middleware('throttle:6,1')
         ->name('poker.subscribe');

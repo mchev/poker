@@ -27,6 +27,14 @@ class PokerController extends Controller
         return Inertia::render('Poker/Index', $this->scheduling->pageData($participant));
     }
 
+    public function history(Request $request): Response
+    {
+        /** @var Participant|null $participant */
+        $participant = $request->attributes->get('poker_participant');
+
+        return Inertia::render('Poker/History', $this->scheduling->historyData($participant));
+    }
+
     public function subscribe(SubscribeParticipantRequest $request): RedirectResponse
     {
         $participant = $this->scheduling->subscribe(
@@ -60,7 +68,11 @@ class PokerController extends Controller
         /** @var Participant $participant */
         $participant = $request->participant();
 
-        $startsAt = Carbon::parse($request->validated('date').' '.$request->validated('time'));
+        $startsAt = Carbon::createFromFormat(
+            'Y-m-d H:i',
+            $request->validated('date').' '.$request->validated('time'),
+            config('app.timezone'),
+        );
 
         $this->scheduling->proposeDate($participant, $startsAt);
 

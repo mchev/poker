@@ -1,5 +1,16 @@
 <script setup lang="ts">
-import { Form, Head, usePoll } from '@inertiajs/vue3';
+import { Form, Head, router, usePoll } from '@inertiajs/vue3';
+import {
+    CalendarPlus,
+    Check,
+    LogOut,
+    Mail,
+    PartyPopper,
+    RefreshCw,
+    Sparkles,
+    Users,
+    X,
+} from 'lucide-vue-next';
 import { computed, ref } from 'vue';
 import PokerController from '@/actions/App/Http/Controllers/PokerController';
 import InputError from '@/components/InputError.vue';
@@ -14,17 +25,6 @@ import {
 } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import {
-    CalendarPlus,
-    Check,
-    LogOut,
-    Mail,
-    PartyPopper,
-    RefreshCw,
-    Sparkles,
-    Users,
-    X,
-} from 'lucide-vue-next';
 
 type RoundDate = {
     id: number;
@@ -71,26 +71,46 @@ const selectedVotes = ref<Record<number, string>>(
     ),
 );
 
+const voteSubmittingForDateId = ref<number | null>(null);
+
 const isPolling = computed(() => props.round.status === 'polling');
 const isConfirmed = computed(() => props.round.status === 'confirmed');
 const confirmedDate = computed(() => props.round.confirmedDate);
 
 const pokerCard =
-    'gap-0 overflow-hidden border-2 border-amber-500/30 bg-[#0d4a32]/95 py-0 text-[#f5f0e1] shadow-[0_16px_48px_rgba(0,0,0,0.55),inset_0_1px_0_rgba(255,255,255,0.08)] backdrop-blur-sm';
+    'gap-0 overflow-hidden border border-white/10 bg-black/55 py-0 text-white shadow-[0_18px_54px_rgba(0,0,0,0.75),inset_0_1px_0_rgba(255,255,255,0.06)] backdrop-blur-md';
 
 const pokerHeader =
-    'gap-3 border-b border-amber-500/20 bg-[#0a3d28]/80 px-6 pt-6 pb-5';
+    'gap-3 border-b border-white/10 bg-black/40 px-6 pt-6 pb-5';
 
-const pokerMuted = 'text-[#a8c4b4]';
+const pokerMuted = 'text-white/60';
 const pokerInput =
-    'h-12 border-amber-500/25 bg-[#082818] text-base text-[#faf6ed] placeholder:text-[#6a8a78] focus-visible:border-amber-400/50 focus-visible:ring-amber-400/20';
+    'h-12 border-white/10 bg-black/40 text-base text-white placeholder:text-white/35 focus-visible:border-amber-400/45 focus-visible:ring-amber-400/20';
 const pokerPanel =
-    'rounded-xl border border-amber-500/20 bg-[#082818]/70 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]';
-const goldButton =
-    'border-amber-500/50 bg-gradient-to-b from-amber-400 to-amber-600 text-stone-950 shadow-[0_4px_16px_rgba(212,175,55,0.25)] hover:from-amber-300 hover:to-amber-500 hover:text-stone-950';
+    'rounded-xl border border-white/10 bg-black/35 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]';
+const casinoChipPrimary =
+    '!relative !rounded-xl !border !border-amber-400/35 !bg-black/55 !bg-[linear-gradient(180deg,rgba(255,255,255,0.10)_0%,rgba(255,255,255,0.04)_45%,rgba(0,0,0,0.35)_100%)] !px-4 !text-amber-50 shadow-[0_14px_40px_rgba(0,0,0,0.75),0_0_0_1px_rgba(251,191,36,0.10),inset_0_1px_0_rgba(255,255,255,0.10)] backdrop-blur-md hover:!bg-[linear-gradient(180deg,rgba(255,255,255,0.14)_0%,rgba(255,255,255,0.06)_45%,rgba(0,0,0,0.40)_100%)]';
+
+const casinoChipNeutral =
+    '!relative !rounded-xl !border !border-white/15 !bg-black/45 !bg-[linear-gradient(180deg,rgba(255,255,255,0.10)_0%,rgba(255,255,255,0.04)_45%,rgba(0,0,0,0.35)_100%)] !px-4 !text-white/90 shadow-[0_14px_40px_rgba(0,0,0,0.75),inset_0_1px_0_rgba(255,255,255,0.10)] backdrop-blur-md hover:!bg-[linear-gradient(180deg,rgba(255,255,255,0.14)_0%,rgba(255,255,255,0.06)_45%,rgba(0,0,0,0.40)_100%)]';
 
 function setVote(dateId: number, vote: string): void {
     selectedVotes.value = { ...selectedVotes.value, [dateId]: vote };
+
+    router.post(
+        PokerController.storeVotes.url(),
+        { votes: { [dateId]: vote } },
+        {
+            preserveScroll: true,
+            only: ['round', 'subscribedCount'],
+            onStart: () => {
+                voteSubmittingForDateId.value = dateId;
+            },
+            onFinish: () => {
+                voteSubmittingForDateId.value = null;
+            },
+        },
+    );
 }
 
 function formatNames(names: string[]): string {
@@ -103,21 +123,21 @@ const voteOptions = [
         label: 'Partant !',
         icon: Check,
         activeClass:
-            'border-emerald-500 bg-emerald-700 text-white shadow-[0_0_0_2px_rgba(212,175,55,0.5)] hover:bg-emerald-700',
+            '!border-emerald-400/55 !text-emerald-50 shadow-[0_0_0_2px_rgba(52,211,153,0.18),0_14px_40px_rgba(0,0,0,0.75),inset_0_1px_0_rgba(255,255,255,0.10)] !bg-[linear-gradient(180deg,rgba(52,211,153,0.18)_0%,rgba(52,211,153,0.08)_55%,rgba(0,0,0,0.35)_100%)]',
     },
     {
         value: 'maybe',
         label: 'Peut-être',
         icon: CalendarPlus,
         activeClass:
-            'border-amber-500 bg-amber-500 text-stone-950 hover:bg-amber-500',
+            '!border-amber-400/55 !text-amber-50 shadow-[0_0_0_2px_rgba(251,191,36,0.18),0_14px_40px_rgba(0,0,0,0.75),inset_0_1px_0_rgba(255,255,255,0.10)] !bg-[linear-gradient(180deg,rgba(251,191,36,0.20)_0%,rgba(251,191,36,0.09)_55%,rgba(0,0,0,0.35)_100%)]',
     },
     {
         value: 'no',
         label: 'Pas possible',
         icon: X,
         activeClass:
-            'border-stone-500 bg-stone-700 text-white hover:bg-stone-700',
+            '!border-rose-400/55 !text-rose-50 shadow-[0_0_0_2px_rgba(251,113,133,0.18),0_14px_40px_rgba(0,0,0,0.75),inset_0_1px_0_rgba(255,255,255,0.10)] !bg-[linear-gradient(180deg,rgba(251,113,133,0.18)_0%,rgba(251,113,133,0.08)_55%,rgba(0,0,0,0.35)_100%)]',
     },
 ] as const;
 </script>
@@ -127,18 +147,18 @@ const voteOptions = [
 
     <div class="space-y-6">
         <section
-            class="flex flex-wrap items-center gap-3 rounded-2xl border border-amber-500/25 bg-[#0a3d28]/90 px-4 py-3.5 text-sm text-[#dcebe2] shadow-lg"
+            class="flex flex-wrap items-center gap-3 rounded-2xl border border-white/10 bg-black/55 px-4 py-3.5 text-sm text-white/80 shadow-lg backdrop-blur-md"
         >
-            <Users class="size-4 shrink-0 text-amber-400" />
+            <Users class="size-4 shrink-0 text-amber-300" />
             <span>
-                <strong class="text-amber-300">{{ subscribedCount }}</strong>
+                <strong class="text-amber-200">{{ subscribedCount }}</strong>
                 {{
                     subscribedCount > 1
                         ? 'joueurs inscrits'
                         : 'joueur inscrit'
                 }}
                 · dès que
-                <strong class="text-amber-300">{{
+                <strong class="text-amber-200">{{
                     round.minParticipants
                 }}</strong>
                 {{
@@ -151,13 +171,13 @@ const voteOptions = [
 
         <Card v-if="!participant" :class="pokerCard">
             <CardHeader :class="pokerHeader">
-                <div class="flex items-center gap-2 text-amber-400">
+                <div class="flex items-center gap-2 text-amber-300">
                     <Sparkles class="size-5" />
                     <span class="text-sm font-semibold uppercase tracking-wider"
                         >Première fois ?</span
                     >
                 </div>
-                <CardTitle class="font-serif text-2xl text-amber-50">
+                <CardTitle class="font-serif text-2xl text-white">
                     Rejoins la table
                 </CardTitle>
                 <CardDescription :class="['text-base', pokerMuted]">
@@ -206,7 +226,7 @@ const voteOptions = [
                     <Button
                         type="submit"
                         class="h-12 w-full text-base font-semibold"
-                        :class="goldButton"
+                        :class="casinoChipPrimary"
                         :disabled="processing"
                     >
                         <Mail class="mr-2 size-4" />
@@ -222,11 +242,11 @@ const voteOptions = [
 
         <template v-else>
             <section
-                class="flex flex-col gap-4 rounded-2xl border border-amber-500/20 bg-[#0a3d28]/70 px-4 py-4 sm:flex-row sm:items-center sm:justify-between"
+                class="flex flex-col gap-4 rounded-2xl border border-white/10 bg-black/45 px-4 py-4 backdrop-blur-md sm:flex-row sm:items-center sm:justify-between"
             >
-                <p class="text-sm text-[#dcebe2]">
+                <p class="text-sm text-white/85">
                     Salut
-                    <strong class="text-amber-300">{{ participant.name }}</strong
+                    <strong class="text-amber-200">{{ participant.name }}</strong
                     > !
                 </p>
 
@@ -238,7 +258,7 @@ const voteOptions = [
                         <Button
                             type="submit"
                             variant="outline"
-                            class="h-11 w-full border-amber-500/30 bg-transparent text-amber-100 hover:bg-amber-500/10 hover:text-amber-50 sm:w-auto"
+                            class="h-11 w-full border-white/10 bg-black/35 text-white/80 hover:bg-white/5 hover:text-white sm:w-auto"
                             :disabled="processing"
                         >
                             <RefreshCw
@@ -273,12 +293,12 @@ const voteOptions = [
             <Card v-if="isConfirmed && confirmedDate" :class="pokerCard">
                 <CardHeader :class="pokerHeader">
                     <Badge
-                        class="w-fit border border-emerald-500/30 bg-emerald-800/80 px-3 py-1 text-sm font-semibold text-emerald-100 hover:bg-emerald-800/80"
+                        class="w-fit border border-amber-400/30 bg-amber-500/10 px-3 py-1 text-sm font-semibold text-amber-100 hover:bg-amber-500/10"
                     >
                         <PartyPopper class="mr-1.5 inline size-4" />
                         C’est calé !
                     </Badge>
-                    <CardTitle class="font-serif text-3xl text-amber-50">
+                    <CardTitle class="font-serif text-3xl text-white">
                         {{ confirmedDate.label }}
                     </CardTitle>
                     <CardDescription :class="['text-base', pokerMuted]">
@@ -288,10 +308,10 @@ const voteOptions = [
                 <CardContent class="space-y-4 px-6 pt-6 pb-6">
                     <div class="grid gap-3 sm:grid-cols-2">
                         <div :class="pokerPanel">
-                            <p class="text-xs font-semibold uppercase tracking-wider text-emerald-400/90">
+                            <p class="text-xs font-semibold uppercase tracking-wider text-amber-300/90">
                                 Je viens
                             </p>
-                            <p class="mt-1 text-sm text-[#dcebe2]">
+                            <p class="mt-1 text-sm text-white/85">
                                 {{ formatNames(confirmedDate.attendingNames) }}
                             </p>
                         </div>
@@ -299,7 +319,7 @@ const voteOptions = [
                             <p class="text-xs font-semibold uppercase tracking-wider text-stone-400">
                                 Pas cette fois
                             </p>
-                            <p class="mt-1 text-sm text-[#dcebe2]">
+                            <p class="mt-1 text-sm text-white/85">
                                 {{ formatNames(confirmedDate.declinedNames) }}
                             </p>
                         </div>
@@ -315,7 +335,7 @@ const voteOptions = [
                             <Button
                                 type="submit"
                                 class="h-12 w-full text-base font-semibold"
-                                :class="goldButton"
+                                :class="casinoChipPrimary"
                                 :disabled="processing"
                             >
                                 Je viens !
@@ -331,7 +351,7 @@ const voteOptions = [
                             <Button
                                 type="submit"
                                 variant="outline"
-                                class="h-12 w-full border-amber-500/30 bg-[#082818] text-base text-[#dcebe2] hover:bg-[#0a3d28] hover:text-amber-50"
+                                class="h-12 w-full border-white/10 bg-black/40 text-base text-white/85 hover:bg-white/5 hover:text-white"
                                 :disabled="processing"
                             >
                                 Pas cette fois
@@ -343,12 +363,9 @@ const voteOptions = [
 
             <Card v-if="isPolling" :class="pokerCard">
                 <CardHeader :class="pokerHeader">
-                    <CardTitle class="font-serif text-xl text-amber-50">
+                    <CardTitle class="font-serif text-xl text-white">
                         Proposer un créneau
                     </CardTitle>
-                    <CardDescription :class="pokerMuted">
-                        Une date qui te arrange ? Ajoute-la et on vote.
-                    </CardDescription>
                 </CardHeader>
                 <CardContent class="px-6 pt-6 pb-6">
                     <Form
@@ -390,7 +407,7 @@ const voteOptions = [
                             <Button
                                 type="submit"
                                 class="h-12 w-full font-semibold sm:w-auto"
-                                :class="goldButton"
+                                :class="casinoChipPrimary"
                                 :disabled="processing"
                             >
                                 Ajouter
@@ -402,7 +419,7 @@ const voteOptions = [
 
             <Card v-if="isPolling" :class="pokerCard">
                 <CardHeader :class="pokerHeader">
-                    <CardTitle class="font-serif text-xl text-amber-50">
+                    <CardTitle class="font-serif text-xl text-white">
                         T’es dispo quand ?
                     </CardTitle>
                 </CardHeader>
@@ -423,7 +440,7 @@ const voteOptions = [
                         class="rounded-xl border p-4 transition-all"
                         :class="
                             date.reachedThreshold
-                                ? 'border-emerald-500/40 bg-emerald-950/40 shadow-[inset_0_0_0_1px_rgba(16,185,129,0.2)]'
+                                ? 'border-amber-400/35 bg-amber-500/5 shadow-[inset_0_0_0_1px_rgba(251,191,36,0.10)]'
                                 : pokerPanel
                         "
                     >
@@ -431,40 +448,40 @@ const voteOptions = [
                             class="mb-4 flex flex-wrap items-start justify-between gap-3"
                         >
                             <div>
-                                <p class="font-semibold text-amber-50">
+                                <p class="font-semibold text-white">
                                     {{ date.label }}
                                 </p>
                             </div>
                             <Badge
                                 v-if="date.reachedThreshold"
-                                class="border border-emerald-500/30 bg-emerald-800/80 text-emerald-100 hover:bg-emerald-800/80"
+                                class="border border-amber-400/30 bg-amber-500/10 text-amber-100 hover:bg-amber-500/10"
                             >
                                 On peut y aller !
                             </Badge>
                         </div>
 
                         <div class="mb-4 grid gap-2 text-sm sm:grid-cols-3">
-                            <div class="rounded-lg bg-[#061f14]/60 px-3 py-2">
-                                <p class="text-xs uppercase tracking-wide text-emerald-400/90">
+                            <div class="rounded-lg bg-black/35 px-3 py-2">
+                                <p class="text-xs uppercase tracking-wide text-amber-300/90">
                                     Partants
                                 </p>
-                                <p class="mt-0.5 text-[#dcebe2]">
+                                <p class="mt-0.5 text-white/85">
                                     {{ formatNames(date.yesNames) }}
                                 </p>
                             </div>
-                            <div class="rounded-lg bg-[#061f14]/60 px-3 py-2">
-                                <p class="text-xs uppercase tracking-wide text-amber-400/90">
+                            <div class="rounded-lg bg-black/35 px-3 py-2">
+                                <p class="text-xs uppercase tracking-wide text-white/65">
                                     Peut-être
                                 </p>
-                                <p class="mt-0.5 text-[#dcebe2]">
+                                <p class="mt-0.5 text-white/85">
                                     {{ formatNames(date.maybeNames) }}
                                 </p>
                             </div>
-                            <div class="rounded-lg bg-[#061f14]/60 px-3 py-2">
+                            <div class="rounded-lg bg-black/35 px-3 py-2">
                                 <p class="text-xs uppercase tracking-wide text-stone-400">
                                     Pas possible
                                 </p>
-                                <p class="mt-0.5 text-[#dcebe2]">
+                                <p class="mt-0.5 text-white/85">
                                     {{ formatNames(date.noNames) }}
                                 </p>
                             </div>
@@ -476,12 +493,15 @@ const voteOptions = [
                                 :key="option.value"
                                 type="button"
                                 variant="outline"
-                                class="h-12 justify-center border-amber-500/25 bg-[#082818] text-base text-[#dcebe2]"
-                                :class="
+                                :class="[
+                                    'h-12 justify-center text-base transition-transform active:translate-y-px active:scale-[0.99]',
+                                    casinoChipNeutral,
                                     selectedVotes[date.id] === option.value
                                         ? option.activeClass
-                                        : 'hover:bg-[#0a3d28]'
-                                "
+                                        : 'hover:bg-white/5',
+                                ]"
+                                :aria-pressed="selectedVotes[date.id] === option.value"
+                                :disabled="voteSubmittingForDateId === date.id"
                                 @click="setVote(date.id, option.value)"
                             >
                                 <component
@@ -492,40 +512,6 @@ const voteOptions = [
                             </Button>
                         </div>
                     </div>
-
-                    <Form
-                        v-if="round.dates.length > 0"
-                        v-bind="PokerController.storeVotes.form()"
-                        v-slot="{ processing }"
-                        class="space-y-4"
-                    >
-                        <template
-                            v-for="(vote, dateId) in selectedVotes"
-                            :key="dateId"
-                        >
-                            <input
-                                type="hidden"
-                                :name="`votes[${dateId}]`"
-                                :value="vote"
-                            />
-                        </template>
-
-                        <Button
-                            type="submit"
-                            class="h-12 w-full text-base font-semibold"
-                            :class="goldButton"
-                            :disabled="
-                                processing ||
-                                Object.keys(selectedVotes).length === 0
-                            "
-                        >
-                            {{
-                                processing
-                                    ? 'On enregistre…'
-                                    : 'Valider mes réponses'
-                            }}
-                        </Button>
-                    </Form>
                 </CardContent>
             </Card>
         </template>

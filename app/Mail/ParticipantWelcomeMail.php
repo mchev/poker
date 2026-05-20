@@ -18,7 +18,7 @@ class ParticipantWelcomeMail extends Mailable
     public function envelope(): Envelope
     {
         return new Envelope(
-            subject: 'Ton lien pour les soirées poker',
+            subject: 'Ton lien Poker party',
         );
     }
 

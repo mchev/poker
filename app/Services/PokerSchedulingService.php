@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Enums\Availability;
 use App\Enums\SchedulingRoundStatus;
 use App\Mail\NewPollOpenedMail;
+use App\Mail\NewProposedDateMail;
 use App\Mail\ParticipantWelcomeMail;
 use App\Mail\TournamentConfirmedMail;
 use App\Models\Participant;
@@ -72,7 +73,7 @@ class PokerSchedulingService
 
         abort_unless($round->isPolling(), 403, 'Les propositions de dates ne sont pas ouvertes pour le moment.');
 
-        return ProposedDate::query()->firstOrCreate(
+        $proposedDate = ProposedDate::query()->firstOrCreate(
             [
                 'scheduling_round_id' => $round->id,
                 'starts_at' => $startsAt,
@@ -81,6 +82,22 @@ class PokerSchedulingService
                 'proposed_by_participant_id' => $participant->id,
             ],
         );
+
+        if ($proposedDate->wasRecentlyCreated) {
+            Participant::query()
+                ->whereKeyNot($participant->id)
+                ->each(function (Participant $recipient) use ($proposedDate, $participant): void {
+                    Mail::to($recipient->email)->send(
+                        new NewProposedDateMail(
+                            participant: $recipient,
+                            proposedDate: $proposedDate,
+                            proposedByName: $participant->name,
+                        ),
+                    );
+                });
+        }
+
+        return $proposedDate;
     }
 
     /**
@@ -182,6 +199,46 @@ class PokerSchedulingService
             });
 
         return $completed;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function historyData(?Participant $participant): array
+    {
+        $this->completePastTournaments();
+
+        $pastNights = SchedulingRound::query()
+            ->where('status', SchedulingRoundStatus::Completed)
+            ->whereNotNull('confirmed_proposed_date_id')
+            ->with(['confirmedDate.votes.participant'])
+            ->get()
+            ->sortByDesc(fn (SchedulingRound $round): string => $round->confirmedDate?->starts_at?->toIso8601String() ?? '')
+            ->values()
+            ->map(function (SchedulingRound $round): array {
+                $confirmedDate = $round->confirmedDate;
+
+                return [
+                    'id' => $round->id,
+                    'startsAt' => $confirmedDate->starts_at->toIso8601String(),
+                    'label' => $confirmedDate->starts_at
+                        ->locale('fr')
+                        ->translatedFormat('l j F Y \à H\hi'),
+                    'attendingCount' => $confirmedDate->votes
+                        ->where('availability', Availability::Yes)
+                        ->count(),
+                    'attendingNames' => $this->voterNames($confirmedDate, Availability::Yes),
+                    'declinedNames' => $this->voterNames($confirmedDate, Availability::No),
+                ];
+            })
+            ->all();
+
+        return [
+            'pastNights' => $pastNights,
+            'participant' => $participant ? [
+                'name' => $participant->name,
+            ] : null,
+        ];
     }
 
     /**

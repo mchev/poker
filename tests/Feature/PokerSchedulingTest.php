@@ -3,6 +3,7 @@
 use App\Enums\Availability;
 use App\Enums\SchedulingRoundStatus;
 use App\Mail\NewPollOpenedMail;
+use App\Mail\NewProposedDateMail;
 use App\Mail\ParticipantWelcomeMail;
 use App\Mail\TournamentConfirmedMail;
 use App\Models\Participant;
@@ -13,6 +14,23 @@ use App\Services\PokerSchedulingService;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Mail;
+
+test('proposed dates keep the local time entered in the form', function () {
+    $participant = Participant::factory()->create();
+    SchedulingRound::factory()->create(['status' => SchedulingRoundStatus::Polling]);
+
+    $this->withCookie(config('poker.cookie_name'), $participant->token)
+        ->post(route('poker.dates.store', ['token' => $participant->token]), [
+            'date' => '2026-09-18',
+            'time' => '18:00',
+        ])
+        ->assertRedirect();
+
+    $label = app(PokerSchedulingService::class)
+        ->pageData($participant)['round']['dates'][0]['label'];
+
+    expect($label)->toBe('vendredi 18 septembre 2026 à 18h00');
+});
 
 test('dates are formatted in french', function () {
     CarbonImmutable::setLocale('fr');
@@ -38,6 +56,52 @@ test('home page renders poker scheduling screen', function () {
             ->has('subscribedCount'));
 });
 
+test('history page renders completed poker nights without exposing emails', function () {
+    $round = SchedulingRound::factory()->completed()->create();
+    $confirmedDate = ProposedDate::factory()->create([
+        'scheduling_round_id' => $round->id,
+        'starts_at' => CarbonImmutable::parse('2026-03-15 20:00:00'),
+        'proposed_by_participant_id' => null,
+    ]);
+
+    $round->update(['confirmed_proposed_date_id' => $confirmedDate->id]);
+
+    $attending = Participant::factory()->create(['name' => 'Alex']);
+    $declined = Participant::factory()->create(['name' => 'Marie']);
+
+    Vote::factory()->create([
+        'participant_id' => $attending->id,
+        'proposed_date_id' => $confirmedDate->id,
+        'availability' => Availability::Yes,
+    ]);
+
+    Vote::factory()->create([
+        'participant_id' => $declined->id,
+        'proposed_date_id' => $confirmedDate->id,
+        'availability' => Availability::No,
+    ]);
+
+    $this->get(route('poker.history'))
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->component('Poker/History')
+            ->has('pastNights', 1)
+            ->where('pastNights.0.label', 'dimanche 15 mars 2026 à 20h00')
+            ->where('pastNights.0.attendingNames', ['Alex'])
+            ->where('pastNights.0.declinedNames', ['Marie'])
+            ->missing('pastNights.0.attendingNames.0.email'));
+});
+
+test('history page shows an empty state when no nights are completed', function () {
+    SchedulingRound::factory()->create(['status' => SchedulingRoundStatus::Polling]);
+
+    $this->get(route('poker.history'))
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->component('Poker/History')
+            ->has('pastNights', 0));
+});
+
 test('participants can subscribe and receive a personal link', function () {
     Mail::fake();
 
@@ -54,6 +118,25 @@ test('participants can subscribe and receive a personal link', function () {
     $response->assertRedirect(route('home', ['token' => $participant->token]));
 
     Mail::assertSent(ParticipantWelcomeMail::class, fn ($mail) => $mail->hasTo('alex@example.com'));
+});
+
+test('participants receive an email when a new date is proposed', function () {
+    Mail::fake();
+
+    $participants = Participant::factory()->count(3)->create();
+    $proposer = $participants->first();
+
+    SchedulingRound::factory()->create(['status' => SchedulingRoundStatus::Polling]);
+
+    $this->withCookie(config('poker.cookie_name'), $proposer->token)
+        ->post(route('poker.dates.store', ['token' => $proposer->token]), [
+            'date' => '2026-10-02',
+            'time' => '20:00',
+        ])
+        ->assertRedirect();
+
+    Mail::assertSent(NewProposedDateMail::class, 2);
+    Mail::assertNotSent(NewProposedDateMail::class, fn ($mail) => $mail->hasTo($proposer->email));
 });
 
 test('participants are synced to the Brevo contact list on subscribe', function () {

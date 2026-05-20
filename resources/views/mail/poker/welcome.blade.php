@@ -1,15 +1,15 @@
 <x-mail::message>
 # Salut {{ $name }} !
 
-Tu es inscrit·e pour nos soirées poker entre potes.
+Bienvenue à la table.
 
-Voici ton lien perso pour voter sur les dates et dire si tu viens — pas besoin de mot de passe :
+Voici ton lien perso pour proposer une date, voter, et confirmer ta présence — pas besoin de mot de passe :
 
 <x-mail::button :url="$url">
 Rejoindre la table
 </x-mail::button>
 
-Garde ce lien pour toi. Les mails des autres ne sont jamais affichés sur le site.
+Garde ce lien de côté (et évite de le partager).
 
 À la prochaine,<br>
 {{ config('app.name') }}
