@@ -8,6 +8,7 @@ use App\Http\Requests\StoreProposedDateRequest;
 use App\Http\Requests\StoreVotesRequest;
 use App\Http\Requests\SubscribeParticipantRequest;
 use App\Models\Participant;
+use App\Models\ProposedDate;
 use App\Services\PokerSchedulingService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -74,11 +75,31 @@ class PokerController extends Controller
             config('app.timezone'),
         );
 
-        $this->scheduling->proposeDate($participant, $startsAt);
+        $this->scheduling->proposeDate(
+            $participant,
+            $startsAt,
+            $request->locationLabel(),
+            $request->validated('theme'),
+        );
 
         return back()->with('toast', [
             'type' => 'success',
             'message' => 'Date ajoutée ! Les autres peuvent voter.',
+        ]);
+    }
+
+    public function destroyProposedDate(Request $request, ProposedDate $proposedDate): RedirectResponse
+    {
+        /** @var Participant|null $participant */
+        $participant = $request->attributes->get('poker_participant');
+
+        abort_unless($participant instanceof Participant, 403);
+
+        $this->scheduling->deleteProposedDate($participant, $proposedDate);
+
+        return back()->with('toast', [
+            'type' => 'success',
+            'message' => 'Créneau supprimé.',
         ]);
     }
 

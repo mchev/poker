@@ -9,7 +9,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-#[Fillable(['scheduling_round_id', 'starts_at', 'proposed_by_participant_id'])]
+#[Fillable(['scheduling_round_id', 'starts_at', 'location', 'theme', 'proposed_by_participant_id'])]
 class ProposedDate extends Model
 {
     /** @use HasFactory<ProposedDateFactory> */

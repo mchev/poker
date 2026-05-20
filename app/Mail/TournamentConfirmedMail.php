@@ -35,7 +35,8 @@ class TournamentConfirmedMail extends Mailable
                 'dateLabel' => $this->proposedDate->starts_at
                     ->locale('fr')
                     ->translatedFormat('l j F Y \à H\hi'),
-                'location' => config('poker.location'),
+                'location' => $this->proposedDate->location ?: config('poker.location'),
+                'theme' => $this->proposedDate->theme,
                 'url' => route('home', ['token' => $this->participant->token]),
             ],
         );

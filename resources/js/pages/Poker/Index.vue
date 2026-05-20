@@ -6,9 +6,10 @@ import {
     LogOut,
     Mail,
     PartyPopper,
+    Plus,
     RefreshCw,
     Sparkles,
-    Users,
+    Trash2,
     X,
 } from 'lucide-vue-next';
 import { computed, ref } from 'vue';
@@ -30,6 +31,8 @@ type RoundDate = {
     id: number;
     startsAt: string;
     label: string;
+    location: string | null;
+    theme: string | null;
     yesCount: number;
     maybeCount: number;
     yesNames: string[];
@@ -38,6 +41,7 @@ type RoundDate = {
     reachedThreshold: boolean;
     myVote: 'yes' | 'no' | 'maybe' | null;
     isConfirmed: boolean;
+    canDelete: boolean;
 };
 
 type Round = {
@@ -48,6 +52,8 @@ type Round = {
         id: number;
         startsAt: string;
         label: string;
+        location: string | null;
+        theme: string | null;
         attendingCount: number;
         attendingNames: string[];
         declinedNames: string[];
@@ -57,7 +63,8 @@ type Round = {
 
 const props = defineProps<{
     round: Round;
-    participant: { name: string } | null;
+    participant: { id: number; name: string } | null;
+    participants: { id: number; name: string }[];
     subscribedCount: number;
 }>();
 
@@ -72,10 +79,47 @@ const selectedVotes = ref<Record<number, string>>(
 );
 
 const voteSubmittingForDateId = ref<number | null>(null);
+const dateDeletingId = ref<number | null>(null);
+const proposedLocationType = ref('mine');
+const isProposeFormOpen = ref(false);
 
 const isPolling = computed(() => props.round.status === 'polling');
 const isConfirmed = computed(() => props.round.status === 'confirmed');
 const confirmedDate = computed(() => props.round.confirmedDate);
+const otherParticipants = computed(() =>
+    props.participants.filter(
+        (participant) => participant.id !== props.participant?.id,
+    ),
+);
+const registeredPlayersLabel = computed(
+    () =>
+        `${props.subscribedCount} ${
+            props.subscribedCount > 1 ? 'joueurs inscrits' : 'joueur inscrit'
+        }`,
+);
+const bestOptimisticYesCount = computed(() =>
+    props.round.dates.reduce((bestCount, date) => {
+        const selectedVote = selectedVotes.value[date.id] ?? date.myVote;
+        const yesCount =
+            date.yesCount -
+            (date.myVote === 'yes' ? 1 : 0) +
+            (selectedVote === 'yes' ? 1 : 0);
+
+        return Math.max(bestCount, yesCount);
+    }, 0),
+);
+const pollDescription = computed(() => {
+    const threshold = props.round.minParticipants;
+
+    return `${registeredPlayersLabel.value} · ${bestOptimisticYesCount.value}/${threshold} partants sur le meilleur créneau.`;
+});
+const pollThresholdDescription = computed(() => {
+    const threshold = props.round.minParticipants;
+    const availabilityText =
+        threshold > 1 ? 'sont dispo le même soir' : 'est dispo';
+
+    return `Dès que ${threshold} ${availabilityText}, c’est calé !`;
+});
 
 const pokerCard =
     'gap-0 overflow-hidden border border-white/10 bg-black/55 py-0 text-white shadow-[0_18px_54px_rgba(0,0,0,0.75),inset_0_1px_0_rgba(255,255,255,0.06)] backdrop-blur-md';
@@ -113,6 +157,19 @@ function setVote(dateId: number, vote: string): void {
     );
 }
 
+function deleteProposedDate(dateId: number): void {
+    router.delete(PokerController.destroyProposedDate.url(dateId), {
+        preserveScroll: true,
+        only: ['round', 'subscribedCount'],
+        onStart: () => {
+            dateDeletingId.value = dateId;
+        },
+        onFinish: () => {
+            dateDeletingId.value = null;
+        },
+    });
+}
+
 function formatNames(names: string[]): string {
     return names.length > 0 ? names.join(', ') : '—';
 }
@@ -146,29 +203,6 @@ const voteOptions = [
     <Head title="Poker party" />
 
     <div class="space-y-6">
-        <section
-            class="flex flex-wrap items-center gap-3 rounded-2xl border border-white/10 bg-black/55 px-4 py-3.5 text-sm text-white/80 shadow-lg backdrop-blur-md"
-        >
-            <Users class="size-4 shrink-0 text-amber-300" />
-            <span>
-                <strong class="text-amber-200">{{ subscribedCount }}</strong>
-                {{
-                    subscribedCount > 1
-                        ? 'joueurs inscrits'
-                        : 'joueur inscrit'
-                }}
-                · dès que
-                <strong class="text-amber-200">{{
-                    round.minParticipants
-                }}</strong>
-                {{
-                    round.minParticipants > 1
-                        ? ' sont dispo le même soir'
-                        : ' est dispo'
-                }}, c’est calé !
-            </span>
-        </section>
-
         <Card v-if="!participant" :class="pokerCard">
             <CardHeader :class="pokerHeader">
                 <div class="flex items-center gap-2 text-amber-300">
@@ -302,7 +336,17 @@ const voteOptions = [
                         {{ confirmedDate.label }}
                     </CardTitle>
                     <CardDescription :class="['text-base', pokerMuted]">
-                        Le lieu t’a été envoyé par mail. Tu viens ?
+                        <span v-if="confirmedDate.location">
+                            {{ confirmedDate.location }}
+                            <span v-if="confirmedDate.theme">
+                                · {{ confirmedDate.theme }}
+                            </span>
+                            · Tu viens ?
+                        </span>
+                        <span v-else-if="confirmedDate.theme">
+                            {{ confirmedDate.theme }} · Tu viens ?
+                        </span>
+                        <span v-else>Tu viens ?</span>
                     </CardDescription>
                 </CardHeader>
                 <CardContent class="space-y-4 px-6 pt-6 pb-6">
@@ -363,54 +407,164 @@ const voteOptions = [
 
             <Card v-if="isPolling" :class="pokerCard">
                 <CardHeader :class="pokerHeader">
-                    <CardTitle class="font-serif text-xl text-white">
-                        Proposer un créneau
-                    </CardTitle>
+                    <div
+                        class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between"
+                    >
+                        <div>
+                            <CardTitle class="font-serif text-xl text-white">
+                                Proposer un créneau
+                            </CardTitle>
+                            <CardDescription :class="pokerMuted">
+                                Ajoute une date seulement quand tu as un vrai
+                                plan en tête.
+                            </CardDescription>
+                        </div>
+                        <Button
+                            type="button"
+                            class="h-11 w-full font-semibold sm:w-auto"
+                            :class="casinoChipPrimary"
+                            @click="isProposeFormOpen = !isProposeFormOpen"
+                        >
+                            <Plus
+                                class="mr-2 size-4 transition-transform"
+                                :class="{ 'rotate-45': isProposeFormOpen }"
+                            />
+                            {{
+                                isProposeFormOpen
+                                    ? 'Refermer'
+                                    : 'Proposer une date'
+                            }}
+                        </Button>
+                    </div>
                 </CardHeader>
-                <CardContent class="px-6 pt-6 pb-6">
+                <CardContent
+                    v-if="isProposeFormOpen"
+                    class="space-y-5 px-6 pt-6 pb-6"
+                >
                     <Form
                         v-bind="PokerController.storeProposedDate.form()"
                         reset-on-success
-                        class="grid gap-4 sm:grid-cols-[1fr_1fr_auto]"
+                        class="space-y-5"
                         v-slot="{ errors, processing }"
                     >
-                        <div class="grid gap-2">
-                            <Label for="date" class="text-[#dcebe2]"
-                                >Quel jour ?</Label
-                            >
-                            <Input
-                                id="date"
-                                type="date"
-                                name="date"
-                                required
-                                :class="pokerInput"
-                            />
-                            <InputError :message="errors.date" />
+                        <div class="grid gap-4 sm:grid-cols-2">
+                            <div class="grid gap-2">
+                                <Label for="date" class="text-[#dcebe2]"
+                                    >Quel jour ?</Label
+                                >
+                                <Input
+                                    id="date"
+                                    type="date"
+                                    name="date"
+                                    required
+                                    :class="pokerInput"
+                                />
+                                <InputError :message="errors.date" />
+                            </div>
+
+                            <div class="grid gap-2">
+                                <Label for="time" class="text-[#dcebe2]"
+                                    >À quelle heure ?</Label
+                                >
+                                <Input
+                                    id="time"
+                                    type="time"
+                                    name="time"
+                                    required
+                                    value="20:00"
+                                    :class="pokerInput"
+                                />
+                                <InputError :message="errors.time" />
+                            </div>
                         </div>
 
-                        <div class="grid gap-2">
-                            <Label for="time" class="text-[#dcebe2]"
-                                >À quelle heure ?</Label
-                            >
-                            <Input
-                                id="time"
-                                type="time"
-                                name="time"
-                                required
-                                value="20:00"
-                                :class="pokerInput"
-                            />
-                            <InputError :message="errors.time" />
+                        <div class="grid gap-4 lg:grid-cols-[1fr_1fr]">
+                            <div class="grid gap-2">
+                                <Label
+                                    for="location_type"
+                                    class="text-[#dcebe2]"
+                                    >Où ?</Label
+                                >
+                                <select
+                                    id="location_type"
+                                    v-model="proposedLocationType"
+                                    name="location_type"
+                                    required
+                                    :class="[pokerInput, 'rounded-md px-3']"
+                                >
+                                    <option value="mine">Chez moi</option>
+                                    <option
+                                        value="member"
+                                        :disabled="
+                                            otherParticipants.length === 0
+                                        "
+                                    >
+                                        Chez un autre membre
+                                    </option>
+                                    <option value="fabrique">
+                                        La fabrique
+                                    </option>
+                                    <option value="custom">Saisie libre</option>
+                                </select>
+                                <InputError :message="errors.location_type" />
+
+                                <select
+                                    v-if="proposedLocationType === 'member'"
+                                    name="location_participant_id"
+                                    required
+                                    :class="[pokerInput, 'rounded-md px-3']"
+                                >
+                                    <option value="" disabled selected>
+                                        Choisir un membre
+                                    </option>
+                                    <option
+                                        v-for="member in otherParticipants"
+                                        :key="member.id"
+                                        :value="member.id"
+                                    >
+                                        Chez {{ member.name }}
+                                    </option>
+                                </select>
+                                <InputError
+                                    :message="errors.location_participant_id"
+                                />
+
+                                <Input
+                                    v-if="proposedLocationType === 'custom'"
+                                    name="location_custom"
+                                    required
+                                    maxlength="80"
+                                    placeholder="Ex: Club house"
+                                    :class="pokerInput"
+                                />
+                                <InputError
+                                    :message="errors.location_custom"
+                                />
+                            </div>
+
+                            <div class="grid gap-2">
+                                <Label for="theme" class="text-[#dcebe2]">
+                                    Thème (optionnel)
+                                </Label>
+                                <Input
+                                    id="theme"
+                                    name="theme"
+                                    maxlength="80"
+                                    placeholder="Ex: soirée débutants"
+                                    :class="pokerInput"
+                                />
+                                <InputError :message="errors.theme" />
+                            </div>
                         </div>
 
-                        <div class="flex items-end">
+                        <div class="flex justify-end">
                             <Button
                                 type="submit"
                                 class="h-12 w-full font-semibold sm:w-auto"
                                 :class="casinoChipPrimary"
                                 :disabled="processing"
                             >
-                                Ajouter
+                                {{ processing ? 'Ajout…' : 'Ajouter' }}
                             </Button>
                         </div>
                     </Form>
@@ -422,6 +576,11 @@ const voteOptions = [
                     <CardTitle class="font-serif text-xl text-white">
                         T’es dispo quand ?
                     </CardTitle>
+                    <CardDescription :class="['text-sm', pokerMuted]">
+                        <span>{{ pollDescription }}</span>
+                        <br />
+                        <span>{{ pollThresholdDescription }}</span>
+                    </CardDescription>
                 </CardHeader>
                 <CardContent class="space-y-4 px-6 pt-6 pb-6">
                     <p
@@ -451,13 +610,39 @@ const voteOptions = [
                                 <p class="font-semibold text-white">
                                     {{ date.label }}
                                 </p>
+                                <div
+                                    class="mt-2 flex flex-wrap items-center gap-2 text-sm text-white/60"
+                                >
+                                    <span v-if="date.location">
+                                        {{ date.location }}
+                                    </span>
+                                    <Badge
+                                        v-if="date.theme"
+                                        class="border border-white/10 bg-white/5 text-white/75 hover:bg-white/5"
+                                    >
+                                        {{ date.theme }}
+                                    </Badge>
+                                </div>
                             </div>
-                            <Badge
-                                v-if="date.reachedThreshold"
-                                class="border border-amber-400/30 bg-amber-500/10 text-amber-100 hover:bg-amber-500/10"
-                            >
-                                On peut y aller !
-                            </Badge>
+                            <div class="flex items-center gap-2">
+                                <Badge
+                                    v-if="date.reachedThreshold"
+                                    class="border border-amber-400/30 bg-amber-500/10 text-amber-100 hover:bg-amber-500/10"
+                                >
+                                    On peut y aller !
+                                </Badge>
+                                <Button
+                                    v-if="date.canDelete"
+                                    type="button"
+                                    variant="ghost"
+                                    class="h-9 border border-white/10 bg-black/30 px-3 text-white/60 hover:bg-rose-500/10 hover:text-rose-100"
+                                    :disabled="dateDeletingId === date.id"
+                                    @click="deleteProposedDate(date.id)"
+                                >
+                                    <Trash2 class="mr-1.5 size-4" />
+                                    Supprimer
+                                </Button>
+                            </div>
                         </div>
 
                         <div class="mb-4 grid gap-2 text-sm sm:grid-cols-3">

@@ -37,6 +37,8 @@ class NewProposedDateMail extends Mailable
                 'dateLabel' => $this->proposedDate->starts_at
                     ->locale('fr')
                     ->translatedFormat('l j F Y \à H\hi'),
+                'location' => $this->proposedDate->location,
+                'theme' => $this->proposedDate->theme,
                 'url' => route('home', ['token' => $this->participant->token]),
             ],
         );

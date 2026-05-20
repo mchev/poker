@@ -23,6 +23,7 @@ test('proposed dates keep the local time entered in the form', function () {
         ->post(route('poker.dates.store', ['token' => $participant->token]), [
             'date' => '2026-09-18',
             'time' => '18:00',
+            'location_type' => 'fabrique',
         ])
         ->assertRedirect();
 
@@ -132,11 +133,90 @@ test('participants receive an email when a new date is proposed', function () {
         ->post(route('poker.dates.store', ['token' => $proposer->token]), [
             'date' => '2026-10-02',
             'time' => '20:00',
+            'location_type' => 'fabrique',
         ])
         ->assertRedirect();
 
     Mail::assertSent(NewProposedDateMail::class, 2);
     Mail::assertNotSent(NewProposedDateMail::class, fn ($mail) => $mail->hasTo($proposer->email));
+});
+
+test('participants can choose a location when proposing a date', function () {
+    Mail::fake();
+
+    $proposer = Participant::factory()->create(['name' => 'Alex']);
+    $host = Participant::factory()->create(['name' => 'Marie']);
+
+    SchedulingRound::factory()->create(['status' => SchedulingRoundStatus::Polling]);
+
+    $this->withCookie(config('poker.cookie_name'), $proposer->token)
+        ->post(route('poker.dates.store', ['token' => $proposer->token]), [
+            'date' => '2026-10-09',
+            'time' => '20:00',
+            'location_type' => 'member',
+            'location_participant_id' => $host->id,
+            'theme' => 'Soirée débutants',
+        ])
+        ->assertRedirect();
+
+    $data = app(PokerSchedulingService::class)->pageData($proposer);
+
+    expect(ProposedDate::query()->first()->location)->toBe('Chez Marie')
+        ->and(ProposedDate::query()->first()->theme)->toBe('Soirée débutants')
+        ->and($data['round']['dates'][0]['location'])->toBe('Chez Marie')
+        ->and($data['round']['dates'][0]['theme'])->toBe('Soirée débutants')
+        ->and($data['round']['dates'][0]['canDelete'])->toBeTrue()
+        ->and($data['participants'])->toContain([
+            'id' => $host->id,
+            'name' => 'Marie',
+        ]);
+});
+
+test('participants can delete their own proposed date while polling', function () {
+    Mail::fake();
+
+    $participant = Participant::factory()->create();
+    $round = SchedulingRound::factory()->create(['status' => SchedulingRoundStatus::Polling]);
+    $proposedDate = ProposedDate::factory()->create([
+        'scheduling_round_id' => $round->id,
+        'proposed_by_participant_id' => $participant->id,
+    ]);
+
+    Vote::factory()->create([
+        'participant_id' => $participant->id,
+        'proposed_date_id' => $proposedDate->id,
+        'availability' => Availability::Yes,
+    ]);
+
+    $this->withCookie(config('poker.cookie_name'), $participant->token)
+        ->delete(route('poker.dates.destroy', [
+            'token' => $participant->token,
+            'proposedDate' => $proposedDate,
+        ]))
+        ->assertRedirect()
+        ->assertSessionHas('toast.message', 'Créneau supprimé.');
+
+    expect(ProposedDate::query()->whereKey($proposedDate->id)->exists())->toBeFalse()
+        ->and(Vote::query()->where('proposed_date_id', $proposedDate->id)->exists())->toBeFalse();
+});
+
+test('participants cannot delete another participant proposed date', function () {
+    $owner = Participant::factory()->create();
+    $otherParticipant = Participant::factory()->create();
+    $round = SchedulingRound::factory()->create(['status' => SchedulingRoundStatus::Polling]);
+    $proposedDate = ProposedDate::factory()->create([
+        'scheduling_round_id' => $round->id,
+        'proposed_by_participant_id' => $owner->id,
+    ]);
+
+    $this->withCookie(config('poker.cookie_name'), $otherParticipant->token)
+        ->delete(route('poker.dates.destroy', [
+            'token' => $otherParticipant->token,
+            'proposedDate' => $proposedDate,
+        ]))
+        ->assertForbidden();
+
+    expect(ProposedDate::query()->whereKey($proposedDate->id)->exists())->toBeTrue();
 });
 
 test('participants are synced to the Brevo contact list on subscribe', function () {
@@ -176,6 +256,7 @@ test('subscribed participants can propose dates and vote without exposing emails
         ->post(route('poker.dates.store', ['token' => $participant->token]), [
             'date' => now()->addWeek()->format('Y-m-d'),
             'time' => '20:00',
+            'location_type' => 'mine',
         ])
         ->assertRedirect();
 

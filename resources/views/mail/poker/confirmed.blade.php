@@ -9,6 +9,10 @@ Bonne nouvelle : **c’est calé**.
 **Où :** {{ $location }}
 @endif
 
+@if ($theme)
+**Thème :** {{ $theme }}
+@endif
+
 Tu viens à cette Poker party ?
 
 <x-mail::button :url="$url">

@@ -67,7 +67,7 @@ class PokerSchedulingService
         return Participant::query()->where('token', $token)->first();
     }
 
-    public function proposeDate(Participant $participant, Carbon $startsAt): ProposedDate
+    public function proposeDate(Participant $participant, Carbon $startsAt, string $location, ?string $theme = null): ProposedDate
     {
         $round = $this->activeRound();
 
@@ -80,6 +80,8 @@ class PokerSchedulingService
             ],
             [
                 'proposed_by_participant_id' => $participant->id,
+                'location' => $location,
+                'theme' => filled($theme) ? trim($theme) : null,
             ],
         );
 
@@ -98,6 +100,17 @@ class PokerSchedulingService
         }
 
         return $proposedDate;
+    }
+
+    public function deleteProposedDate(Participant $participant, ProposedDate $proposedDate): void
+    {
+        $round = $this->activeRound();
+
+        abort_unless($round->isPolling(), 403, 'Les propositions de dates ne sont pas ouvertes pour le moment.');
+        abort_unless($proposedDate->scheduling_round_id === $round->id, 404);
+        abort_unless($proposedDate->proposed_by_participant_id === $participant->id, 403);
+
+        $proposedDate->delete();
     }
 
     /**
@@ -224,6 +237,8 @@ class PokerSchedulingService
                     'label' => $confirmedDate->starts_at
                         ->locale('fr')
                         ->translatedFormat('l j F Y \à H\hi'),
+                    'location' => $confirmedDate->location,
+                    'theme' => $confirmedDate->theme,
                     'attendingCount' => $confirmedDate->votes
                         ->where('availability', Availability::Yes)
                         ->count(),
@@ -236,6 +251,7 @@ class PokerSchedulingService
         return [
             'pastNights' => $pastNights,
             'participant' => $participant ? [
+                'id' => $participant->id,
                 'name' => $participant->name,
             ] : null,
         ];
@@ -273,13 +289,15 @@ class PokerSchedulingService
                     'label' => $round->confirmedDate->starts_at
                         ->locale('fr')
                         ->translatedFormat('l j F Y \à H\hi'),
+                    'location' => $round->confirmedDate->location,
+                    'theme' => $round->confirmedDate->theme,
                     'attendingCount' => $round->confirmedDate->votes
                         ->where('availability', Availability::Yes)
                         ->count(),
                     'attendingNames' => $this->voterNames($round->confirmedDate, Availability::Yes),
                     'declinedNames' => $this->voterNames($round->confirmedDate, Availability::No),
                 ] : null,
-                'dates' => $round->proposedDates->map(function (ProposedDate $date) use ($participantVotes, $round): array {
+                'dates' => $round->proposedDates->map(function (ProposedDate $date) use ($participantVotes, $round, $participant): array {
                     $yesCount = $date->votes->where('availability', Availability::Yes)->count();
                     $maybeCount = $date->votes->where('availability', Availability::Maybe)->count();
 
@@ -289,6 +307,8 @@ class PokerSchedulingService
                         'label' => $date->starts_at
                             ->locale('fr')
                             ->translatedFormat('l j F Y \à H\hi'),
+                        'location' => $date->location,
+                        'theme' => $date->theme,
                         'yesCount' => $yesCount,
                         'maybeCount' => $maybeCount,
                         'yesNames' => $this->voterNames($date, Availability::Yes),
@@ -299,12 +319,24 @@ class PokerSchedulingService
                             ? null
                             : ($participantVotes->get($date->id)?->value ?? null),
                         'isConfirmed' => $round->confirmed_proposed_date_id === $date->id,
+                        'canDelete' => $round->isPolling()
+                            && $participant instanceof Participant
+                            && $date->proposed_by_participant_id === $participant->id,
                     ];
                 })->values()->all(),
             ],
             'participant' => $participant ? [
+                'id' => $participant->id,
                 'name' => $participant->name,
             ] : null,
+            'participants' => Participant::query()
+                ->orderBy('name')
+                ->get(['id', 'name'])
+                ->map(fn (Participant $participant): array => [
+                    'id' => $participant->id,
+                    'name' => $participant->name,
+                ])
+                ->all(),
             'subscribedCount' => Participant::query()->count(),
         ];
     }

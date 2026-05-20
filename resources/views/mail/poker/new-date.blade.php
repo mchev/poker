@@ -5,6 +5,14 @@
 
 **{{ $dateLabel }}**
 
+@if ($location)
+**Où :** {{ $location }}
+@endif
+
+@if ($theme)
+**Thème :** {{ $theme }}
+@endif
+
 <x-mail::button :url="$url">
 Voir / voter
 </x-mail::button>

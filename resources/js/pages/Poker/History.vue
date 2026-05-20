@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { Head, Link } from '@inertiajs/vue3';
 import { ArrowLeft, History } from 'lucide-vue-next';
+import { Badge } from '@/components/ui/badge';
 import {
     Card,
     CardContent,
@@ -14,6 +15,8 @@ type PastNight = {
     id: number;
     startsAt: string;
     label: string;
+    location: string | null;
+    theme: string | null;
     attendingCount: number;
     attendingNames: string[];
     declinedNames: string[];
@@ -21,7 +24,7 @@ type PastNight = {
 
 defineProps<{
     pastNights: PastNight[];
-    participant: { name: string } | null;
+    participant: { id: number; name: string } | null;
 }>();
 
 const pokerCard =
@@ -86,6 +89,19 @@ function formatNames(names: string[]): string {
                     <h2 class="font-serif text-xl font-semibold text-white">
                         {{ night.label }}
                     </h2>
+                    <div
+                        class="mt-2 flex flex-wrap items-center gap-2 text-sm text-white/60"
+                    >
+                        <span v-if="night.location">
+                            {{ night.location }}
+                        </span>
+                        <Badge
+                            v-if="night.theme"
+                            class="border border-white/10 bg-white/5 text-white/75 hover:bg-white/5"
+                        >
+                            {{ night.theme }}
+                        </Badge>
+                    </div>
 
                     <div class="mt-4 grid gap-3 sm:grid-cols-2">
                         <div>

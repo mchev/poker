@@ -22,6 +22,8 @@ class ProposedDateFactory extends Factory
         return [
             'scheduling_round_id' => SchedulingRound::factory(),
             'starts_at' => fake()->dateTimeBetween('+3 days', '+3 weeks'),
+            'location' => 'La fabrique',
+            'theme' => null,
             'proposed_by_participant_id' => Participant::factory(),
         ];
     }
