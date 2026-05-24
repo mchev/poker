@@ -11,7 +11,6 @@ import { Button } from '@/components/ui/button';
 import {
     casinoChipNeutral,
     casinoChipPrimary,
-    pokerInput,
     pokerPanel,
     voteOptionHint,
 } from '@/lib/pokerUi';
