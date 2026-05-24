@@ -35,8 +35,8 @@ type ConfirmedDate = {
     beginnersWelcome: boolean;
     note: string | null;
     myVote: 'yes' | 'no' | 'maybe' | null;
+    attendingCount: number;
     attendingNames: string[];
-    declinedNames: string[];
     canEditLocation: boolean;
     canEditNote: boolean;
     calendarIcsUrl: string;
@@ -53,8 +53,13 @@ const emit = defineEmits<{
     'update:editLocationType': [value: string];
 }>();
 
-const showAttendees = ref(false);
 const showEditPanel = ref(false);
+
+const participantsBadgeLabel = computed(() => {
+    const count = props.confirmedDate.attendingCount;
+
+    return count > 1 ? `${count} participants` : `${count} participant`;
+});
 
 const editLocationTypeModel = computed({
     get: () => props.editLocationType,
@@ -82,6 +87,11 @@ const editLocationTypeModel = computed({
                     class="border border-sky-400/30 bg-sky-500/10 text-sky-100 hover:bg-sky-500/10"
                 >
                     Débutant·e·s OK
+                </Badge>
+                <Badge
+                    class="border border-emerald-400/30 bg-emerald-500/10 text-emerald-100 hover:bg-emerald-500/10"
+                >
+                    {{ participantsBadgeLabel }}
                 </Badge>
                 <Badge
                     v-if="confirmedDate.myVote"
@@ -235,27 +245,12 @@ const editLocationTypeModel = computed({
                 </Form>
             </div>
 
-            <Button
-                type="button"
-                variant="ghost"
-                class="h-9 w-full border border-white/10 bg-black/30 text-sm text-white/75 hover:bg-white/5 hover:text-white"
-                @click="showAttendees = !showAttendees"
-            >
-                {{ showAttendees ? 'Masquer' : 'Voir qui vient' }}
-            </Button>
-
-            <div v-if="showAttendees" class="grid gap-3 sm:grid-cols-2">
-                <PokerNameList
-                    :names="confirmedDate.attendingNames"
-                    label="Je viens"
-                    label-class="text-amber-300/90"
-                />
-                <PokerNameList
-                    :names="confirmedDate.declinedNames"
-                    label="Pas cette fois"
-                    label-class="text-stone-400"
-                />
-            </div>
+            <PokerNameList
+                :names="confirmedDate.attendingNames"
+                label="Participants"
+                label-class="text-amber-300/90"
+                :max-visible="999"
+            />
 
             <div class="flex flex-col gap-3 sm:flex-row">
                 <Form

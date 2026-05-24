@@ -68,6 +68,19 @@ Run `php artisan test --compact tests/Feature/PokerSchedulingTest.php` after cha
 
 Use `Mail::assertQueued()` for poker mailables (they implement `ShouldQueue`).
 
+## Demo data (local only)
+
+Reset the poker UI with realistic scenarios (calés, sondage, historique) :
+
+```bash
+php artisan db:seed --class=PokerDemoSeeder
+```
+
+- **Local only** — refuses to run in other environments.
+- Wipes participants, votes, dates, and rounds (not Fortify users).
+- Main test account : **Martin** (`martin@pegase.io`) with a fixed token printed in the console.
+- Covers : 2 soirées calées (7 et 4 partants), 3 créneaux en sondage (presque validé, débutants, peu de votes), 1 soirée passée dans l’historique.
+
 ## UX Notes
 
 - Large touch targets (`h-11` / `h-12`) for participants without smartphones.
