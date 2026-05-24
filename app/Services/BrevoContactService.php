@@ -17,7 +17,7 @@ class BrevoContactService
 
     public function syncParticipant(Participant $participant): void
     {
-        if (! $this->isConfigured()) {
+        if (! $this->isConfigured() || app()->environment('local')) {
             return;
         }
 

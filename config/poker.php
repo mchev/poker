@@ -16,15 +16,28 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | Location (email only)
+    | Location fallback
     |--------------------------------------------------------------------------
     |
-    | The meeting location is never shown on the public page. It is included
-    | only in confirmation emails sent to subscribed participants.
+    | Used when a proposed date has no location and in calendar exports.
     |
     */
 
     'location' => env('POKER_LOCATION'),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Local mail safety (Brevo / prod list)
+    |--------------------------------------------------------------------------
+    |
+    | In local, participant notification e-mails are redirected to a single
+    | inbox so the production Brevo list is never spammed during dev.
+    |
+    */
+
+    'redirect_mail_in_local' => (bool) env('POKER_REDIRECT_MAIL_IN_LOCAL', true),
+
+    'local_mail_redirect' => env('POKER_LOCAL_MAIL_REDIRECT', 'martin@pegase.io'),
 
     /*
     |--------------------------------------------------------------------------

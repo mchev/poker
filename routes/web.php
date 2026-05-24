@@ -11,6 +11,8 @@ Route::get('/robots.txt', fn () => response("User-agent: *\nDisallow: /\n", 200,
 Route::middleware(ResolvePokerParticipant::class)->group(function (): void {
     Route::get('/', [PokerController::class, 'index'])->name('home');
     Route::get('/historique', [PokerController::class, 'history'])->name('poker.history');
+    Route::get('/dates/{proposedDate}/agenda.ics', [PokerController::class, 'calendar'])
+        ->name('poker.dates.calendar');
     Route::post('/inscription', [PokerController::class, 'subscribe'])
         ->middleware('throttle:6,1')
         ->name('poker.subscribe');
@@ -20,6 +22,9 @@ Route::middleware(ResolvePokerParticipant::class)->group(function (): void {
     Route::post('/dates', [PokerController::class, 'storeProposedDate'])
         ->middleware('throttle:20,1')
         ->name('poker.dates.store');
+    Route::patch('/dates/{proposedDate}', [PokerController::class, 'updateProposedDate'])
+        ->middleware('throttle:20,1')
+        ->name('poker.dates.update');
     Route::delete('/dates/{proposedDate}', [PokerController::class, 'destroyProposedDate'])
         ->middleware('throttle:20,1')
         ->name('poker.dates.destroy');

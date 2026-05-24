@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { Link } from '@inertiajs/vue3';
+import { History } from 'lucide-vue-next';
+import { Toaster } from '@/components/ui/sonner';
 import { history } from '@/routes/poker';
 </script>
 
@@ -33,7 +35,7 @@ import { history } from '@/routes/poker';
                 >
                     <span class="text-2xl leading-none text-amber-300">♠</span>
                 </div>
-                <div class="min-w-0">
+                <div class="min-w-0 flex-1">
                     <Link
                         href="/"
                         class="font-serif text-2xl font-bold tracking-tight text-white transition-colors hover:text-amber-200"
@@ -44,8 +46,15 @@ import { history } from '@/routes/poker';
                         Viens te faire plumer !
                     </p>
                 </div>
+                <Link
+                    :href="history.url()"
+                    class="inline-flex h-11 shrink-0 items-center gap-2 rounded-xl border border-white/10 bg-black/35 px-3 text-sm font-medium text-amber-300/90 transition-colors hover:bg-white/5 hover:text-amber-200"
+                >
+                    <History class="size-4" />
+                    <span class="hidden sm:inline">Historique</span>
+                </Link>
                 <div
-                    class="ml-auto hidden gap-1.5 text-xl sm:flex"
+                    class="hidden gap-1.5 text-xl sm:flex"
                     aria-hidden="true"
                 >
                     <span class="text-[#c8dccf]">♣</span>
@@ -61,17 +70,13 @@ import { history } from '@/routes/poker';
         </main>
 
         <footer
-            class="relative z-10 mx-auto max-w-3xl px-4 pb-8 text-center text-xs text-white/45 sm:px-6"
+            class="relative z-10 mx-auto max-w-3xl px-4 pb-8 text-center text-xs text-white/50 sm:px-6"
         >
             <p>
                 Garde ton lien reçu par e-mail pour revenir quand tu veux.
             </p>
-            <Link
-                :href="history.url()"
-                class="mt-3 inline-block font-medium text-amber-300/90 transition-colors hover:text-amber-200"
-            >
-                Historique des soirées passées
-            </Link>
         </footer>
+
+        <Toaster rich-colors close-button position="top-center" />
     </div>
 </template>

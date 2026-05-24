@@ -17,8 +17,19 @@ class Participant extends Model
     /** @use HasFactory<ParticipantFactory> */
     use HasFactory;
 
+    public static function normalizeEmail(string $email): string
+    {
+        return Str::lower(trim($email));
+    }
+
     protected static function booted(): void
     {
+        static::saving(function (Participant $participant): void {
+            if (filled($participant->email)) {
+                $participant->email = self::normalizeEmail($participant->email);
+            }
+        });
+
         static::creating(function (Participant $participant): void {
             if (blank($participant->token)) {
                 $participant->token = Str::random(64);

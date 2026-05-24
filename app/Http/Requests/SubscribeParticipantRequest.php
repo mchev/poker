@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests;
 
+use App\Models\Participant;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
 
@@ -10,6 +11,15 @@ class SubscribeParticipantRequest extends FormRequest
     public function authorize(): bool
     {
         return true;
+    }
+
+    protected function prepareForValidation(): void
+    {
+        if ($this->has('email')) {
+            $this->merge([
+                'email' => Participant::normalizeEmail($this->string('email')->toString()),
+            ]);
+        }
     }
 
     /**

@@ -6,12 +6,15 @@ use App\Mail\AdminParticipantSubscribedMail;
 use App\Mail\NewPollOpenedMail;
 use App\Mail\NewProposedDateMail;
 use App\Mail\ParticipantWelcomeMail;
-use App\Mail\TournamentConfirmedMail;
+use App\Mail\TournamentsConfirmedMail;
 use App\Models\Participant;
 use App\Models\ProposedDate;
 use App\Models\SchedulingRound;
 use App\Models\Vote;
+use App\Services\BrevoContactService;
 use App\Services\PokerSchedulingService;
+use App\Support\PokerMailDispatcher;
+use App\Support\ProposedDateCalendar;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Mail;
@@ -63,6 +66,7 @@ test('history page renders completed poker nights without exposing emails', func
     $confirmedDate = ProposedDate::factory()->create([
         'scheduling_round_id' => $round->id,
         'starts_at' => CarbonImmutable::parse('2026-03-15 20:00:00'),
+        'confirmed_at' => CarbonImmutable::parse('2026-03-10 12:00:00'),
         'proposed_by_participant_id' => null,
     ]);
 
@@ -104,6 +108,43 @@ test('history page shows an empty state when no nights are completed', function 
             ->has('pastNights', 0));
 });
 
+test('re-subscribing with the same email keeps token and votes', function () {
+    Mail::fake();
+    config(['mail.from.address' => 'admin@example.com']);
+
+    $participant = Participant::factory()->create([
+        'email' => 'alex@example.com',
+        'name' => 'Alex',
+    ]);
+    $originalToken = $participant->token;
+
+    $round = SchedulingRound::factory()->create(['status' => SchedulingRoundStatus::Polling]);
+    $proposedDate = ProposedDate::factory()->create([
+        'scheduling_round_id' => $round->id,
+        'proposed_by_participant_id' => $participant->id,
+    ]);
+
+    Vote::factory()->create([
+        'participant_id' => $participant->id,
+        'proposed_date_id' => $proposedDate->id,
+        'availability' => Availability::Yes,
+    ]);
+
+    $this->post(route('poker.subscribe'), [
+        'name' => 'Alexandre',
+        'email' => 'ALEX@example.com',
+    ])->assertRedirect(route('home', ['token' => $originalToken]));
+
+    $participant->refresh();
+
+    expect($participant->token)->toBe($originalToken)
+        ->and($participant->name)->toBe('Alexandre')
+        ->and(Participant::query()->count())->toBe(1)
+        ->and(Vote::query()->where('participant_id', $participant->id)->count())->toBe(1);
+
+    Mail::assertQueued(ParticipantWelcomeMail::class, fn ($mail) => $mail->hasTo('alex@example.com'));
+});
+
 test('participants can subscribe and receive a personal link', function () {
     Mail::fake();
     config(['mail.from.address' => 'admin@example.com']);
@@ -120,8 +161,8 @@ test('participants can subscribe and receive a personal link', function () {
 
     $response->assertRedirect(route('home', ['token' => $participant->token]));
 
-    Mail::assertSent(ParticipantWelcomeMail::class, fn ($mail) => $mail->hasTo('alex@example.com'));
-    Mail::assertSent(AdminParticipantSubscribedMail::class, fn ($mail) => $mail->hasTo('admin@example.com'));
+    Mail::assertQueued(ParticipantWelcomeMail::class, fn ($mail) => $mail->hasTo('alex@example.com'));
+    Mail::assertQueued(AdminParticipantSubscribedMail::class, fn ($mail) => $mail->hasTo('admin@example.com'));
 });
 
 test('participants receive an email when a new date is proposed', function () {
@@ -140,8 +181,48 @@ test('participants receive an email when a new date is proposed', function () {
         ])
         ->assertRedirect();
 
-    Mail::assertSent(NewProposedDateMail::class, 2);
-    Mail::assertNotSent(NewProposedDateMail::class, fn ($mail) => $mail->hasTo($proposer->email));
+    Mail::assertQueued(NewProposedDateMail::class, 2);
+    Mail::assertNotQueued(NewProposedDateMail::class, fn ($mail) => $mail->hasTo($proposer->email));
+});
+
+test('proposed dates welcome beginners by default', function () {
+    Mail::fake();
+
+    $proposer = Participant::factory()->create();
+
+    SchedulingRound::factory()->create(['status' => SchedulingRoundStatus::Polling]);
+
+    $this->withCookie(config('poker.cookie_name'), $proposer->token)
+        ->post(route('poker.dates.store', ['token' => $proposer->token]), [
+            'date' => '2026-11-21',
+            'time' => '20:00',
+            'location_type' => 'fabrique',
+        ])
+        ->assertRedirect();
+
+    $data = app(PokerSchedulingService::class)->pageData($proposer);
+
+    expect(ProposedDate::query()->first()->beginners_welcome)->toBeTrue()
+        ->and($data['round']['dates'][0]['beginnersWelcome'])->toBeTrue();
+});
+
+test('participants can opt out of welcoming beginners on a proposed date', function () {
+    Mail::fake();
+
+    $proposer = Participant::factory()->create();
+
+    SchedulingRound::factory()->create(['status' => SchedulingRoundStatus::Polling]);
+
+    $this->withCookie(config('poker.cookie_name'), $proposer->token)
+        ->post(route('poker.dates.store', ['token' => $proposer->token]), [
+            'date' => '2026-11-22',
+            'time' => '20:00',
+            'location_type' => 'fabrique',
+            'beginners_welcome' => '0',
+        ])
+        ->assertRedirect();
+
+    expect(ProposedDate::query()->first()->beginners_welcome)->toBeFalse();
 });
 
 test('participants can choose a location when proposing a date', function () {
@@ -166,13 +247,92 @@ test('participants can choose a location when proposing a date', function () {
 
     expect(ProposedDate::query()->first()->location)->toBe('Chez Marie')
         ->and(ProposedDate::query()->first()->theme)->toBe('Soirée débutants')
+        ->and(ProposedDate::query()->first()->beginners_welcome)->toBeTrue()
         ->and($data['round']['dates'][0]['location'])->toBe('Chez Marie')
         ->and($data['round']['dates'][0]['theme'])->toBe('Soirée débutants')
         ->and($data['round']['dates'][0]['canDelete'])->toBeTrue()
         ->and($data['participants'])->toContain([
+            'id' => $proposer->id,
+            'name' => 'Alex',
+        ], [
             'id' => $host->id,
             'name' => 'Marie',
         ]);
+});
+
+test('participants can update location while polling', function () {
+    $participant = Participant::factory()->create(['name' => 'Alex']);
+    $host = Participant::factory()->create(['name' => 'Marie']);
+    $round = SchedulingRound::factory()->create(['status' => SchedulingRoundStatus::Polling]);
+    $proposedDate = ProposedDate::factory()
+        ->for($round)
+        ->create([
+            'location' => 'La fabrique',
+            'proposed_by_participant_id' => $participant->id,
+        ]);
+
+    $this->withCookie(config('poker.cookie_name'), $participant->token)
+        ->patch(route('poker.dates.update', [
+            'proposedDate' => $proposedDate,
+            'token' => $participant->token,
+        ]), [
+            'location_type' => 'member',
+            'location_participant_id' => $host->id,
+        ])
+        ->assertRedirect();
+
+    expect($proposedDate->fresh()->location)->toBe('Chez Marie');
+});
+
+test('participants can update location and note on confirmed date', function () {
+    $participant = Participant::factory()->create(['name' => 'Alex']);
+    $round = SchedulingRound::factory()->create(['status' => SchedulingRoundStatus::Polling]);
+    $proposedDate = ProposedDate::factory()
+        ->for($round)
+        ->create([
+            'location' => 'La fabrique',
+            'confirmed_at' => now(),
+            'proposed_by_participant_id' => $participant->id,
+        ]);
+    $round->update(['confirmed_proposed_date_id' => $proposedDate->id]);
+
+    $this->withCookie(config('poker.cookie_name'), $participant->token)
+        ->patch(route('poker.dates.update', [
+            'proposedDate' => $proposedDate,
+            'token' => $participant->token,
+        ]), [
+            'location_type' => 'mine',
+        ])
+        ->assertRedirect();
+
+    expect($proposedDate->fresh()->location)->toBe('Chez Alex');
+
+    $this->withCookie(config('poker.cookie_name'), $participant->token)
+        ->patch(route('poker.dates.update', [
+            'proposedDate' => $proposedDate,
+            'token' => $participant->token,
+        ]), [
+            'note' => 'Apporter des chips.',
+        ])
+        ->assertRedirect();
+
+    expect($proposedDate->fresh()->note)->toBe('Apporter des chips.');
+});
+
+test('participants cannot add a note before the date is confirmed', function () {
+    $participant = Participant::factory()->create();
+    $round = SchedulingRound::factory()->create(['status' => SchedulingRoundStatus::Polling]);
+    $proposedDate = ProposedDate::factory()
+        ->for($round)
+        ->create([
+            'proposed_by_participant_id' => $participant->id,
+        ]);
+
+    $this->withCookie(config('poker.cookie_name'), $participant->token)
+        ->patch(route('poker.dates.update', $proposedDate), [
+            'note' => 'Trop tôt.',
+        ])
+        ->assertForbidden();
 });
 
 test('participants can delete their own proposed date while polling', function () {
@@ -310,31 +470,271 @@ test('tournament is confirmed and emails are sent when threshold is reached', fu
     app(PokerSchedulingService::class)->attemptConfirmation($round->fresh());
 
     expect($round->fresh())
-        ->status->toBe(SchedulingRoundStatus::Confirmed)
+        ->status->toBe(SchedulingRoundStatus::Polling)
         ->confirmed_proposed_date_id->toBe($proposedDate->id);
 
-    Mail::assertSent(TournamentConfirmedMail::class, 2);
+    expect($proposedDate->fresh()->confirmed_at)->not->toBeNull();
+
+    Mail::assertQueued(TournamentsConfirmedMail::class, 2);
+    Mail::assertQueued(
+        TournamentsConfirmedMail::class,
+        fn (TournamentsConfirmedMail $mail) => $mail->proposedDates->count() === 1,
+    );
 });
 
-test('past tournaments open a new poll and notify participants', function () {
+test('multiple dates confirmed in one batch send a single digest email per participant', function () {
     Mail::fake();
 
-    $participants = Participant::factory()->count(2)->create();
-    $round = SchedulingRound::factory()->confirmed()->create();
-    $proposedDate = ProposedDate::factory()->create([
-        'scheduling_round_id' => $round->id,
-        'starts_at' => now()->subDay(),
+    config(['poker.min_participants' => 2]);
+
+    $round = SchedulingRound::factory()->create(['status' => SchedulingRoundStatus::Polling]);
+    $firstDate = ProposedDate::factory()->for($round)->create([
+        'starts_at' => now()->addWeek(),
+        'proposed_by_participant_id' => null,
+    ]);
+    $secondDate = ProposedDate::factory()->for($round)->create([
+        'starts_at' => now()->addWeeks(2),
         'proposed_by_participant_id' => null,
     ]);
 
-    $round->update(['confirmed_proposed_date_id' => $proposedDate->id]);
+    $voters = Participant::factory()->count(2)->create();
+
+    foreach ($voters as $participant) {
+        foreach ([$firstDate, $secondDate] as $date) {
+            Vote::factory()->create([
+                'participant_id' => $participant->id,
+                'proposed_date_id' => $date->id,
+                'availability' => Availability::Yes,
+            ]);
+        }
+    }
+
+    app(PokerSchedulingService::class)->attemptConfirmation($round->fresh());
+
+    Mail::assertQueued(TournamentsConfirmedMail::class, 2);
+    Mail::assertQueued(
+        TournamentsConfirmedMail::class,
+        fn (TournamentsConfirmedMail $mail) => $mail->proposedDates->count() === 2,
+    );
+});
+
+test('poll dates are sorted by yes count descending then start time', function () {
+    $round = SchedulingRound::factory()->create(['status' => SchedulingRoundStatus::Polling]);
+    $popular = ProposedDate::factory()->for($round)->create([
+        'starts_at' => now()->addWeeks(3),
+        'proposed_by_participant_id' => null,
+    ]);
+    $soon = ProposedDate::factory()->for($round)->create([
+        'starts_at' => now()->addWeek(),
+        'proposed_by_participant_id' => null,
+    ]);
+
+    $voters = Participant::factory()->count(3)->create();
+
+    foreach ($voters->take(2) as $participant) {
+        Vote::factory()->create([
+            'participant_id' => $participant->id,
+            'proposed_date_id' => $popular->id,
+            'availability' => Availability::Yes,
+        ]);
+    }
+
+    Vote::factory()->create([
+        'participant_id' => $voters->last()->id,
+        'proposed_date_id' => $soon->id,
+        'availability' => Availability::Yes,
+    ]);
+
+    $data = app(PokerSchedulingService::class)->pageData(null);
+
+    expect($data['round']['dates'][0]['id'])->toBe($popular->id)
+        ->and($data['round']['dates'][1]['id'])->toBe($soon->id);
+});
+
+test('confirmed dates expose calendar export urls', function () {
+    $round = SchedulingRound::factory()->create(['status' => SchedulingRoundStatus::Polling]);
+    $confirmed = ProposedDate::factory()->for($round)->create([
+        'starts_at' => now()->addWeek(),
+        'confirmed_at' => now(),
+    ]);
+
+    $data = app(PokerSchedulingService::class)->pageData(null);
+
+    expect($data['round']['confirmedDates'][0]['calendarIcsUrl'])
+        ->toBe(route('poker.dates.calendar', $confirmed))
+        ->and($data['round']['confirmedDates'][0]['googleCalendarUrl'])
+        ->toContain('calendar.google.com');
+
+    $this->get(route('poker.dates.calendar', $confirmed))
+        ->assertOk()
+        ->assertHeader('content-type', 'text/calendar; charset=utf-8')
+        ->assertSee('BEGIN:VCALENDAR', false);
+});
+
+test('calendar ics includes beginners welcome in the description', function () {
+    $date = ProposedDate::factory()->create([
+        'starts_at' => now()->addWeek(),
+        'beginners_welcome' => true,
+    ]);
+
+    expect(ProposedDateCalendar::icsContent($date))->toContain('Débutant');
+});
+
+test('new proposed date emails mention beginners welcome', function () {
+    Mail::fake();
+
+    $proposer = Participant::factory()->create();
+    $recipient = Participant::factory()->create();
+    SchedulingRound::factory()->create(['status' => SchedulingRoundStatus::Polling]);
+
+    $this->withCookie(config('poker.cookie_name'), $proposer->token)
+        ->post(route('poker.dates.store', ['token' => $proposer->token]), [
+            'date' => now()->addWeeks(2)->format('Y-m-d'),
+            'time' => '20:00',
+            'location_type' => 'fabrique',
+            'beginners_welcome' => '1',
+        ])
+        ->assertRedirect();
+
+    Mail::assertQueued(NewProposedDateMail::class, function (NewProposedDateMail $mail) use ($recipient) {
+        return $mail->hasTo($recipient->email)
+            && $mail->proposedDate->beginners_welcome;
+    });
+});
+
+test('local environment redirects participant mail to the safe inbox', function () {
+    app()->detectEnvironment(fn () => 'local');
+    config([
+        'poker.redirect_mail_in_local' => true,
+        'poker.local_mail_redirect' => 'martin@pegase.io',
+    ]);
+
+    expect(PokerMailDispatcher::resolveRecipient('player@example.com'))->toBe('martin@pegase.io');
+
+    app()->detectEnvironment(fn () => 'testing');
+});
+
+test('brevo contact sync is skipped in local environment', function () {
+    app()->detectEnvironment(fn () => 'local');
+    config(['brevo.api_key' => 'test-api-key', 'brevo.list_id' => 65]);
+
+    Http::fake();
+
+    $participant = Participant::factory()->create();
+
+    app(BrevoContactService::class)->syncParticipant($participant);
+
+    Http::assertNothingSent();
+
+    app()->detectEnvironment(fn () => 'testing');
+});
+
+test('confirming one date keeps the poll open for other proposed dates', function () {
+    Mail::fake();
+
+    config(['poker.min_participants' => 2]);
+
+    $round = SchedulingRound::factory()->create(['status' => SchedulingRoundStatus::Polling]);
+    $confirmedDate = ProposedDate::factory()->for($round)->create([
+        'starts_at' => now()->addWeek(),
+    ]);
+    $otherDate = ProposedDate::factory()->for($round)->create([
+        'starts_at' => now()->addWeeks(2),
+    ]);
+
+    $voters = Participant::factory()->count(2)->create();
+
+    foreach ($voters as $participant) {
+        Vote::factory()->create([
+            'participant_id' => $participant->id,
+            'proposed_date_id' => $confirmedDate->id,
+            'availability' => Availability::Yes,
+        ]);
+    }
+
+    app(PokerSchedulingService::class)->attemptConfirmation($round->fresh());
+
+    $voter = Participant::factory()->create();
+
+    $this->withCookie(config('poker.cookie_name'), $voter->token)
+        ->post(route('poker.votes.store', ['token' => $voter->token]), [
+            'votes' => [$otherDate->id => Availability::Maybe->value],
+        ])
+        ->assertRedirect();
+
+    $data = app(PokerSchedulingService::class)->pageData($voter);
+
+    expect($round->fresh()->status)->toBe(SchedulingRoundStatus::Polling)
+        ->and($data['round']['confirmedDates'])->toHaveCount(1)
+        ->and($data['round']['confirmedDates'][0]['id'])->toBe($confirmedDate->id)
+        ->and($data['round']['dates'])->toHaveCount(1)
+        ->and($data['round']['dates'][0]['id'])->toBe($otherDate->id)
+        ->and($data['round']['dates'][0]['myVote'])->toBe(Availability::Maybe->value);
+});
+
+test('participants can propose a new date while another date is already confirmed', function () {
+    Mail::fake();
+
+    $participant = Participant::factory()->create();
+    $round = SchedulingRound::factory()->create(['status' => SchedulingRoundStatus::Polling]);
+    ProposedDate::factory()->for($round)->create([
+        'starts_at' => now()->addWeek(),
+        'confirmed_at' => now(),
+    ]);
+
+    $this->withCookie(config('poker.cookie_name'), $participant->token)
+        ->post(route('poker.dates.store', ['token' => $participant->token]), [
+            'date' => '2026-11-14',
+            'time' => '20:00',
+            'location_type' => 'fabrique',
+        ])
+        ->assertRedirect();
+
+    expect(ProposedDate::query()->where('scheduling_round_id', $round->id)->count())->toBe(2);
+});
+
+test('past confirmed sessions close the round and keep future dates in the poll', function () {
+    Mail::fake();
+
+    $round = SchedulingRound::factory()->create(['status' => SchedulingRoundStatus::Polling]);
+    $pastConfirmed = ProposedDate::factory()->for($round)->create([
+        'starts_at' => now()->subDay(),
+        'confirmed_at' => now()->subWeek(),
+        'proposed_by_participant_id' => null,
+    ]);
+    $futureDate = ProposedDate::factory()->for($round)->create([
+        'starts_at' => now()->addWeek(),
+        'proposed_by_participant_id' => null,
+    ]);
 
     app(PokerSchedulingService::class)->completePastTournaments();
 
-    expect($round->fresh()->status)->toBe(SchedulingRoundStatus::Completed);
-    expect(SchedulingRound::query()->where('status', SchedulingRoundStatus::Polling)->count())->toBe(1);
+    expect($round->fresh())
+        ->status->toBe(SchedulingRoundStatus::Completed)
+        ->confirmed_proposed_date_id->toBe($pastConfirmed->id);
 
-    Mail::assertSent(NewPollOpenedMail::class, 2);
+    $activeRound = SchedulingRound::query()
+        ->where('status', SchedulingRoundStatus::Polling)
+        ->sole();
+
+    expect($activeRound->id)->not->toBe($round->id)
+        ->and($futureDate->fresh()->scheduling_round_id)->toBe($activeRound->id)
+        ->and($pastConfirmed->fresh()->scheduling_round_id)->toBe($round->id);
+
+    Mail::assertNotSent(NewPollOpenedMail::class);
+});
+
+test('past confirmed sessions appear in history', function () {
+    $round = SchedulingRound::factory()->create(['status' => SchedulingRoundStatus::Completed]);
+    $pastConfirmed = ProposedDate::factory()->for($round)->create([
+        'starts_at' => now()->subDays(3),
+        'confirmed_at' => now()->subWeek(),
+    ]);
+
+    $data = app(PokerSchedulingService::class)->historyData(null);
+
+    expect($data['pastNights'])->toHaveCount(1)
+        ->and($data['pastNights'][0]['id'])->toBe($pastConfirmed->id);
 });
 
 test('guests cannot vote without a personal token', function () {
@@ -365,5 +765,5 @@ test('participants can request a new access link by email', function () {
         ->assertRedirect()
         ->assertSessionHas('toast.message', 'Lien renvoyé ! Jette un œil à ta boîte mail.');
 
-    Mail::assertSent(ParticipantWelcomeMail::class, fn ($mail) => $mail->hasTo($participant->email));
+    Mail::assertQueued(ParticipantWelcomeMail::class, fn ($mail) => $mail->hasTo($participant->email));
 });

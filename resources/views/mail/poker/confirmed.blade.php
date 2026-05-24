@@ -1,19 +1,34 @@
 <x-mail::message>
 # Salut {{ $name }} !
 
+@if (count($dates) === 1)
 Bonne nouvelle : **c’est calé**.
-
-**Quand :** {{ $dateLabel }}
-
-@if ($location)
-**Où :** {{ $location }}
+@else
+Bonne nouvelle : **{{ count($dates) }} soirées viennent d’être calées**.
 @endif
 
-@if ($theme)
-**Thème :** {{ $theme }}
+@foreach ($dates as $date)
+@if (count($dates) > 1)
+---
+
+@endif
+**Quand :** {{ $date['label'] }}
+
+@if ($date['location'])
+**Où :** {{ $date['location'] }}
 @endif
 
-Tu viens à cette Poker party ?
+@if ($date['theme'])
+**Thème :** {{ $date['theme'] }}
+@endif
+
+@if ($date['beginnersWelcome'])
+**Débutant·e·s :** les bienvenu·e·s sont accepté·e·s sur ce créneau.
+@endif
+
+@endforeach
+
+Tu viens à {{ count($dates) === 1 ? 'cette Poker party' : 'ces soirées' }} ?
 
 <x-mail::button :url="$url">
 Je réponds

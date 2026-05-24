@@ -13,6 +13,10 @@
 **Thème :** {{ $theme }}
 @endif
 
+@if ($beginnersWelcome)
+**Débutant·e·s :** les bienvenu·e·s sont accepté·e·s sur ce créneau.
+@endif
+
 <x-mail::button :url="$url">
 Voir / voter
 </x-mail::button>
@@ -20,4 +24,3 @@ Voir / voter
 À bientôt autour de la table,<br>
 {{ config('app.name') }}
 </x-mail::message>
-

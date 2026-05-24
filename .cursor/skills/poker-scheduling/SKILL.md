@@ -8,16 +8,23 @@ description: "Organisation de soirées poker sans compte utilisateur. Activates 
 ## Product Rules
 
 - No Fortify login required for participants — identify via a 64-char `token` (query param or `poker_token` cookie).
-- Emails and meeting location are **never** exposed on the public Inertia page; location only appears in confirmation emails (`POKER_LOCATION`).
-- Auto-confirm a tournament when a proposed date reaches `POKER_MIN_PARTICIPANTS` (default 4) **yes** votes.
-- After a confirmed tournament date passes, close the round and open a new polling round (hourly command + on page load).
-- Only aggregate counts are shown in the UI, never participant names/emails tied to votes.
+- **Email is the source of truth** — re-subscribing with the same address reuses the existing participant and token (votes and proposals are preserved). Emails are normalized (lowercase, trimmed).
+- Location and optional notes are shown on the public page for proposed/confirmed dates; participants can edit location (polling or confirmed) and add a note once confirmed.
+- **Beginners welcome** defaults to `true` on new proposals (`beginners_welcome`).
+- Auto-confirm a proposed date when it reaches `POKER_MIN_PARTICIPANTS` (default 4) **yes** votes (`confirmed_at` on the date). The poll stays open: other future dates remain visible and votable, and new dates can still be proposed.
+- When several dates are confirmed in one batch, participants receive **one digest e-mail** (not one per date).
+- Poll dates are sorted by **yes count descending**, then by start time.
+- Confirmed dates expose **calendar links** (`.ics` download + Google Calendar URL).
+- A round closes when a **confirmed** date has taken place (`starts_at` in the past). Future proposed dates carry over to the next polling round. No email is sent when the poll continues.
+- Voter **names** are shown on poll cards and confirmed cards (yes / maybe / no lists).
 
 ## Key Files
 
 | Area | Path |
 |------|------|
 | Service (business logic) | `app/Services/PokerSchedulingService.php` |
+| Mail dispatch + local safety | `app/Support/PokerMailDispatcher.php` |
+| Calendar export | `app/Support/ProposedDateCalendar.php` |
 | Public controller | `app/Http/Controllers/PokerController.php` |
 | Page | `resources/js/pages/Poker/Index.vue` |
 | Config | `config/poker.php` |
@@ -26,7 +33,7 @@ description: "Organisation de soirées poker sans compte utilisateur. Activates 
 
 ## Email (Brevo)
 
-Transactional e-mails use Laravel's **Brevo API transport** (`symfony/brevo-mailer`):
+Transactional e-mails use Laravel's **Brevo API transport** (`symfony/brevo-mailer`). All poker mailables implement `ShouldQueue` and are dispatched via `PokerMailDispatcher`.
 
 ```
 MAIL_MAILER=brevo
@@ -39,15 +46,27 @@ BREVO_LIST_ID=65
 
 `MAIL_FROM_ADDRESS` must be a sender verified in Brevo (Senders & Domains).
 
-Participant contacts are synced to list `#65` on subscribe with the `FNAME` attribute. Subscription still works if Brevo sync fails (logged as warning).
+### Local / dev safety (critical)
 
-Alternative: SMTP via `smtp-relay.brevo.com` with `MAIL_MAILER=smtp`.
+The **local `.env` often uses the same `BREVO_API_KEY` as production**. Never send test notifications to the full participant list.
 
-Set `POKER_LOCATION` for the private venue line in confirmation emails only.
+- In `local`, `PokerMailDispatcher` redirects **participant** e-mails to `POKER_LOCAL_MAIL_REDIRECT` (default `martin@pegase.io`).
+- `BrevoContactService::syncParticipant()` is **skipped** in `local` (no writes to list `#65`).
+- Tests must always use `Mail::fake()` — never rely on real sends.
+- For manual local checks, only use `martin@pegase.io` (or override `POKER_LOCAL_MAIL_REDIRECT`).
+- Set `POKER_REDIRECT_MAIL_IN_LOCAL=false` only if you fully understand the risk.
+
+Admin notification (`AdminParticipantSubscribedMail`) is not redirected.
+
+Participant contacts are synced to list `#65` on subscribe (non-local) with the `FNAME` attribute.
+
+Set `POKER_LOCATION` as fallback when a date has no location (e-mails + calendar).
 
 ## Testing
 
 Run `php artisan test --compact tests/Feature/PokerSchedulingTest.php` after changes.
+
+Use `Mail::assertQueued()` for poker mailables (they implement `ShouldQueue`).
 
 ## UX Notes
 

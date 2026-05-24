@@ -19,6 +19,7 @@ class StoreAttendanceRequest extends PokerFormRequest
     public function rules(): array
     {
         return [
+            'proposed_date_id' => ['required', 'integer', 'exists:proposed_dates,id'],
             'attending' => ['required', Rule::in([Availability::Yes->value, Availability::No->value])],
         ];
     }

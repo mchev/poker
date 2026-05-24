@@ -5,12 +5,13 @@ namespace App\Mail;
 use App\Models\Participant;
 use App\Models\ProposedDate;
 use Illuminate\Bus\Queueable;
+use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Mail\Mailable;
 use Illuminate\Mail\Mailables\Content;
 use Illuminate\Mail\Mailables\Envelope;
 use Illuminate\Queue\SerializesModels;
 
-class NewProposedDateMail extends Mailable
+class NewProposedDateMail extends Mailable implements ShouldQueue
 {
     use Queueable, SerializesModels;
 
@@ -18,7 +19,9 @@ class NewProposedDateMail extends Mailable
         public Participant $participant,
         public ProposedDate $proposedDate,
         public string $proposedByName,
-    ) {}
+    ) {
+        $this->afterCommit();
+    }
 
     public function envelope(): Envelope
     {
@@ -39,6 +42,7 @@ class NewProposedDateMail extends Mailable
                     ->translatedFormat('l j F Y \à H\hi'),
                 'location' => $this->proposedDate->location,
                 'theme' => $this->proposedDate->theme,
+                'beginnersWelcome' => $this->proposedDate->beginners_welcome,
                 'url' => route('home', ['token' => $this->participant->token]),
             ],
         );

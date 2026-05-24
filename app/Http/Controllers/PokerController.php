@@ -7,14 +7,17 @@ use App\Http\Requests\StoreAttendanceRequest;
 use App\Http\Requests\StoreProposedDateRequest;
 use App\Http\Requests\StoreVotesRequest;
 use App\Http\Requests\SubscribeParticipantRequest;
+use App\Http\Requests\UpdateProposedDateRequest;
 use App\Models\Participant;
 use App\Models\ProposedDate;
 use App\Services\PokerSchedulingService;
+use App\Support\ProposedDateCalendar;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Inertia\Inertia;
 use Inertia\Response;
+use Symfony\Component\HttpFoundation\Response as HttpResponse;
 
 class PokerController extends Controller
 {
@@ -80,11 +83,35 @@ class PokerController extends Controller
             $startsAt,
             $request->locationLabel(),
             $request->validated('theme'),
+            $request->boolean('beginners_welcome'),
         );
 
         return back()->with('toast', [
             'type' => 'success',
             'message' => 'Date ajoutée ! Les autres peuvent voter.',
+        ]);
+    }
+
+    public function updateProposedDate(UpdateProposedDateRequest $request, ProposedDate $proposedDate): RedirectResponse
+    {
+        /** @var Participant $participant */
+        $participant = $request->participant();
+
+        $updates = [];
+
+        if ($request->has('location_type')) {
+            $updates['location'] = $request->locationLabel();
+        }
+
+        if ($request->has('note')) {
+            $updates['note'] = $request->validated('note');
+        }
+
+        $this->scheduling->updateProposedDate($participant, $proposedDate, $updates);
+
+        return back()->with('toast', [
+            'type' => 'success',
+            'message' => 'C’est enregistré.',
         ]);
     }
 
@@ -108,14 +135,16 @@ class PokerController extends Controller
         /** @var Participant $participant */
         $participant = $request->participant();
 
-        $round = $this->scheduling->activeRound()->load('confirmedDate');
+        $proposedDate = ProposedDate::query()->findOrFail($request->validated('proposed_date_id'));
 
-        if (! $round->isConfirmed() || ! $round->confirmedDate) {
-            abort(403);
-        }
+        abort_unless($proposedDate->isConfirmed(), 403);
+        abort_unless(
+            $proposedDate->scheduling_round_id === $this->scheduling->activeRound()->id,
+            404,
+        );
 
         $this->scheduling->storeVotes($participant, [
-            $round->confirmedDate->id => $request->validated('attending'),
+            $proposedDate->id => $request->validated('attending'),
         ]);
 
         return back()->with('toast', [
@@ -135,6 +164,20 @@ class PokerController extends Controller
             'type' => 'success',
             'message' => 'Lien renvoyé ! Jette un œil à ta boîte mail.',
         ]);
+    }
+
+    public function calendar(ProposedDate $proposedDate): HttpResponse
+    {
+        abort_unless($proposedDate->isConfirmed(), 404);
+
+        return response(
+            ProposedDateCalendar::icsContent($proposedDate),
+            200,
+            [
+                'Content-Type' => 'text/calendar; charset=utf-8',
+                'Content-Disposition' => 'attachment; filename="poker-party.ics"',
+            ],
+        );
     }
 
     public function logout(Request $request): RedirectResponse

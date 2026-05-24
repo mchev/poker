@@ -5,17 +5,18 @@ namespace App\Services;
 use App\Enums\Availability;
 use App\Enums\SchedulingRoundStatus;
 use App\Mail\AdminParticipantSubscribedMail;
-use App\Mail\NewPollOpenedMail;
 use App\Mail\NewProposedDateMail;
 use App\Mail\ParticipantWelcomeMail;
-use App\Mail\TournamentConfirmedMail;
+use App\Mail\TournamentsConfirmedMail;
 use App\Models\Participant;
 use App\Models\ProposedDate;
 use App\Models\SchedulingRound;
 use App\Models\Vote;
+use App\Support\PokerMailDispatcher;
+use App\Support\ProposedDateCalendar;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Mail;
 
 class PokerSchedulingService
 {
@@ -24,10 +25,7 @@ class PokerSchedulingService
     public function activeRound(): SchedulingRound
     {
         $round = SchedulingRound::query()
-            ->whereIn('status', [
-                SchedulingRoundStatus::Polling,
-                SchedulingRoundStatus::Confirmed,
-            ])
+            ->where('status', SchedulingRoundStatus::Polling)
             ->latest('id')
             ->first();
 
@@ -42,13 +40,25 @@ class PokerSchedulingService
 
     public function subscribe(string $name, string $email): Participant
     {
-        $participant = Participant::query()->updateOrCreate(
-            ['email' => $email],
-            ['name' => $name],
-        );
+        $email = Participant::normalizeEmail($email);
 
-        Mail::to($participant->email)->send(new ParticipantWelcomeMail($participant));
-        Mail::to(config('mail.from.address'))->send(new AdminParticipantSubscribedMail($participant));
+        $participant = Participant::query()->firstWhere('email', $email);
+
+        if ($participant) {
+            $participant->update(['name' => $name]);
+        } else {
+            $participant = Participant::query()->create([
+                'name' => $name,
+                'email' => $email,
+            ]);
+        }
+
+        PokerMailDispatcher::queueToParticipant($participant, new ParticipantWelcomeMail($participant));
+        PokerMailDispatcher::queue(
+            config('mail.from.address'),
+            new AdminParticipantSubscribedMail($participant),
+            redirectInLocal: false,
+        );
 
         $this->brevoContacts->syncParticipant($participant);
 
@@ -57,7 +67,7 @@ class PokerSchedulingService
 
     public function sendAccessLink(Participant $participant): void
     {
-        Mail::to($participant->email)->send(new ParticipantWelcomeMail($participant));
+        PokerMailDispatcher::queueToParticipant($participant, new ParticipantWelcomeMail($participant));
     }
 
     public function findParticipantByToken(?string $token): ?Participant
@@ -69,8 +79,13 @@ class PokerSchedulingService
         return Participant::query()->where('token', $token)->first();
     }
 
-    public function proposeDate(Participant $participant, Carbon $startsAt, string $location, ?string $theme = null): ProposedDate
-    {
+    public function proposeDate(
+        Participant $participant,
+        Carbon $startsAt,
+        string $location,
+        ?string $theme = null,
+        bool $beginnersWelcome = true,
+    ): ProposedDate {
         $round = $this->activeRound();
 
         abort_unless($round->isPolling(), 403, 'Les propositions de dates ne sont pas ouvertes pour le moment.');
@@ -84,6 +99,7 @@ class PokerSchedulingService
                 'proposed_by_participant_id' => $participant->id,
                 'location' => $location,
                 'theme' => filled($theme) ? trim($theme) : null,
+                'beginners_welcome' => $beginnersWelcome,
             ],
         );
 
@@ -91,7 +107,8 @@ class PokerSchedulingService
             Participant::query()
                 ->whereKeyNot($participant->id)
                 ->each(function (Participant $recipient) use ($proposedDate, $participant): void {
-                    Mail::to($recipient->email)->send(
+                    PokerMailDispatcher::queueToParticipant(
+                        $recipient,
                         new NewProposedDateMail(
                             participant: $recipient,
                             proposedDate: $proposedDate,
@@ -115,6 +132,44 @@ class PokerSchedulingService
         $proposedDate->delete();
     }
 
+    public function canParticipantEditProposedDate(Participant $participant, ProposedDate $proposedDate): bool
+    {
+        $round = $this->activeRound();
+
+        return $proposedDate->scheduling_round_id === $round->id && $round->isPolling();
+    }
+
+    public function canParticipantEditNote(Participant $participant, ProposedDate $proposedDate): bool
+    {
+        $round = $this->activeRound();
+
+        return $round->isPolling()
+            && $proposedDate->scheduling_round_id === $round->id
+            && $proposedDate->isConfirmed();
+    }
+
+    /**
+     * @param  array{location?: string, note?: string|null}  $updates
+     */
+    public function updateProposedDate(Participant $participant, ProposedDate $proposedDate, array $updates): ProposedDate
+    {
+        abort_unless($this->canParticipantEditProposedDate($participant, $proposedDate), 403);
+
+        if (array_key_exists('note', $updates)) {
+            abort_unless($this->canParticipantEditNote($participant, $proposedDate), 403);
+
+            $proposedDate->note = filled($updates['note']) ? trim($updates['note']) : null;
+        }
+
+        if (array_key_exists('location', $updates)) {
+            $proposedDate->location = $updates['location'];
+        }
+
+        $proposedDate->save();
+
+        return $proposedDate;
+    }
+
     /**
      * @param  array<int, string>  $votes
      */
@@ -133,7 +188,7 @@ class PokerSchedulingService
                     continue;
                 }
 
-                if ($round->isConfirmed()) {
+                if ($proposedDate->isConfirmed()) {
                     $availability = in_array($availability, [Availability::Yes->value, Availability::No->value], true)
                         ? $availability
                         : Availability::No->value;
@@ -164,8 +219,9 @@ class PokerSchedulingService
 
         $threshold = config('poker.min_participants');
 
-        $winningDate = ProposedDate::query()
+        $newlyConfirmedDates = ProposedDate::query()
             ->where('scheduling_round_id', $round->id)
+            ->whereNull('confirmed_at')
             ->withCount([
                 'votes as yes_count' => fn ($query) => $query->where('availability', Availability::Yes),
             ])
@@ -174,21 +230,27 @@ class PokerSchedulingService
             ->sortBy([
                 ['yes_count', 'desc'],
                 ['starts_at', 'asc'],
-            ])
-            ->first();
+            ]);
 
-        if (! $winningDate instanceof ProposedDate) {
-            return;
+        $confirmedDates = collect();
+
+        foreach ($newlyConfirmedDates as $winningDate) {
+            $winningDate->update(['confirmed_at' => now()]);
+            $confirmedDates->push($winningDate->fresh());
+
+            if ($round->confirmed_proposed_date_id === null) {
+                $round->update(['confirmed_proposed_date_id' => $winningDate->id]);
+            }
         }
 
-        $round->update([
-            'status' => SchedulingRoundStatus::Confirmed,
-            'confirmed_proposed_date_id' => $winningDate->id,
-        ]);
-
-        Participant::query()->each(function (Participant $participant) use ($winningDate): void {
-            Mail::to($participant->email)->send(new TournamentConfirmedMail($participant, $winningDate));
-        });
+        if ($confirmedDates->isNotEmpty()) {
+            Participant::query()->each(function (Participant $participant) use ($confirmedDates): void {
+                PokerMailDispatcher::queueToParticipant(
+                    $participant,
+                    new TournamentsConfirmedMail($participant, $confirmedDates),
+                );
+            });
+        }
     }
 
     public function completePastTournaments(): int
@@ -196,21 +258,50 @@ class PokerSchedulingService
         $completed = 0;
 
         SchedulingRound::query()
-            ->where('status', SchedulingRoundStatus::Confirmed)
-            ->whereHas('confirmedDate', fn ($query) => $query->where('starts_at', '<', now()))
-            ->with('confirmedDate')
+            ->where('status', SchedulingRoundStatus::Polling)
+            ->whereHas('proposedDates', function ($query): void {
+                $query
+                    ->whereNotNull('confirmed_at')
+                    ->where('starts_at', '<', now());
+            })
+            ->with('proposedDates')
             ->each(function (SchedulingRound $round) use (&$completed): void {
-                $round->update(['status' => SchedulingRoundStatus::Completed]);
+                DB::transaction(function () use ($round, &$completed): void {
+                    $pastConfirmed = $round->proposedDates
+                        ->filter(fn (ProposedDate $date): bool => $date->isConfirmed() && $date->starts_at->isPast())
+                        ->sortByDesc('starts_at');
 
-                $newRound = SchedulingRound::query()->create([
-                    'status' => SchedulingRoundStatus::Polling,
-                ]);
+                    if ($pastConfirmed->isEmpty()) {
+                        return;
+                    }
 
-                Participant::query()->each(function (Participant $participant) use ($newRound): void {
-                    Mail::to($participant->email)->send(new NewPollOpenedMail($participant, $newRound));
+                    $archivedDate = $pastConfirmed->first();
+
+                    $round->update([
+                        'status' => SchedulingRoundStatus::Completed,
+                        'confirmed_proposed_date_id' => $archivedDate->id,
+                    ]);
+
+                    $datesToCarryOver = $round->proposedDates
+                        ->reject(fn (ProposedDate $date): bool => $date->isConfirmed() && $date->starts_at->isPast());
+
+                    if ($datesToCarryOver->isEmpty()) {
+                        $this->activeRound();
+                        $completed++;
+
+                        return;
+                    }
+
+                    $newRound = SchedulingRound::query()->create([
+                        'status' => SchedulingRoundStatus::Polling,
+                    ]);
+
+                    ProposedDate::query()
+                        ->whereIn('id', $datesToCarryOver->pluck('id'))
+                        ->update(['scheduling_round_id' => $newRound->id]);
+
+                    $completed++;
                 });
-
-                $completed++;
             });
 
         return $completed;
@@ -223,31 +314,28 @@ class PokerSchedulingService
     {
         $this->completePastTournaments();
 
-        $pastNights = SchedulingRound::query()
-            ->where('status', SchedulingRoundStatus::Completed)
-            ->whereNotNull('confirmed_proposed_date_id')
-            ->with(['confirmedDate.votes.participant'])
+        $pastNights = ProposedDate::query()
+            ->whereNotNull('confirmed_at')
+            ->where('starts_at', '<', now())
+            ->with(['votes.participant'])
+            ->orderByDesc('starts_at')
             ->get()
-            ->sortByDesc(fn (SchedulingRound $round): string => $round->confirmedDate?->starts_at?->toIso8601String() ?? '')
-            ->values()
-            ->map(function (SchedulingRound $round): array {
-                $confirmedDate = $round->confirmedDate;
-
-                return [
-                    'id' => $round->id,
-                    'startsAt' => $confirmedDate->starts_at->toIso8601String(),
-                    'label' => $confirmedDate->starts_at
-                        ->locale('fr')
-                        ->translatedFormat('l j F Y \à H\hi'),
-                    'location' => $confirmedDate->location,
-                    'theme' => $confirmedDate->theme,
-                    'attendingCount' => $confirmedDate->votes
-                        ->where('availability', Availability::Yes)
-                        ->count(),
-                    'attendingNames' => $this->voterNames($confirmedDate, Availability::Yes),
-                    'declinedNames' => $this->voterNames($confirmedDate, Availability::No),
-                ];
-            })
+            ->map(fn (ProposedDate $confirmedDate): array => [
+                'id' => $confirmedDate->id,
+                'startsAt' => $confirmedDate->starts_at->toIso8601String(),
+                'label' => $confirmedDate->starts_at
+                    ->locale('fr')
+                    ->translatedFormat('l j F Y \à H\hi'),
+                'location' => $confirmedDate->location,
+                'theme' => $confirmedDate->theme,
+                'beginnersWelcome' => $confirmedDate->beginners_welcome,
+                'note' => $confirmedDate->note,
+                'attendingCount' => $confirmedDate->votes
+                    ->where('availability', Availability::Yes)
+                    ->count(),
+                'attendingNames' => $this->voterNames($confirmedDate, Availability::Yes),
+                'declinedNames' => $this->voterNames($confirmedDate, Availability::No),
+            ])
             ->all();
 
         return [
@@ -270,7 +358,6 @@ class PokerSchedulingService
             'proposedDates' => fn ($query) => $query
                 ->orderBy('starts_at')
                 ->with(['votes.participant']),
-            'confirmedDate.votes.participant',
         ]);
 
         $participantVotes = $participant instanceof Participant
@@ -285,47 +372,49 @@ class PokerSchedulingService
                 'id' => $round->id,
                 'status' => $round->status->value,
                 'minParticipants' => config('poker.min_participants'),
-                'confirmedDate' => $round->confirmedDate ? [
-                    'id' => $round->confirmedDate->id,
-                    'startsAt' => $round->confirmedDate->starts_at->toIso8601String(),
-                    'label' => $round->confirmedDate->starts_at
-                        ->locale('fr')
-                        ->translatedFormat('l j F Y \à H\hi'),
-                    'location' => $round->confirmedDate->location,
-                    'theme' => $round->confirmedDate->theme,
-                    'attendingCount' => $round->confirmedDate->votes
-                        ->where('availability', Availability::Yes)
-                        ->count(),
-                    'attendingNames' => $this->voterNames($round->confirmedDate, Availability::Yes),
-                    'declinedNames' => $this->voterNames($round->confirmedDate, Availability::No),
-                ] : null,
-                'dates' => $round->proposedDates->map(function (ProposedDate $date) use ($participantVotes, $round, $participant): array {
-                    $yesCount = $date->votes->where('availability', Availability::Yes)->count();
-                    $maybeCount = $date->votes->where('availability', Availability::Maybe)->count();
+                'confirmedDates' => $round->proposedDates
+                    ->filter(fn (ProposedDate $date): bool => $date->isConfirmed())
+                    ->map(fn (ProposedDate $date): array => $this->confirmedDatePayload($date, $participant, $participantVotes))
+                    ->values()
+                    ->all(),
+                'dates' => $round->proposedDates
+                    ->filter(fn (ProposedDate $date): bool => ! $date->isConfirmed())
+                    ->map(function (ProposedDate $date) use ($participantVotes, $round, $participant): array {
+                        $yesCount = $date->votes->where('availability', Availability::Yes)->count();
+                        $maybeCount = $date->votes->where('availability', Availability::Maybe)->count();
 
-                    return [
-                        'id' => $date->id,
-                        'startsAt' => $date->starts_at->toIso8601String(),
-                        'label' => $date->starts_at
-                            ->locale('fr')
-                            ->translatedFormat('l j F Y \à H\hi'),
-                        'location' => $date->location,
-                        'theme' => $date->theme,
-                        'yesCount' => $yesCount,
-                        'maybeCount' => $maybeCount,
-                        'yesNames' => $this->voterNames($date, Availability::Yes),
-                        'maybeNames' => $this->voterNames($date, Availability::Maybe),
-                        'noNames' => $this->voterNames($date, Availability::No),
-                        'reachedThreshold' => $yesCount >= config('poker.min_participants'),
-                        'myVote' => $round->isConfirmed() && $round->confirmed_proposed_date_id !== $date->id
-                            ? null
-                            : ($participantVotes->get($date->id)?->value ?? null),
-                        'isConfirmed' => $round->confirmed_proposed_date_id === $date->id,
-                        'canDelete' => $round->isPolling()
-                            && $participant instanceof Participant
-                            && $date->proposed_by_participant_id === $participant->id,
-                    ];
-                })->values()->all(),
+                        return [
+                            'id' => $date->id,
+                            'startsAt' => $date->starts_at->toIso8601String(),
+                            'label' => $date->starts_at
+                                ->locale('fr')
+                                ->translatedFormat('l j F Y \à H\hi'),
+                            'location' => $date->location,
+                            'theme' => $date->theme,
+                            'beginnersWelcome' => $date->beginners_welcome,
+                            'note' => $date->note,
+                            'canEditLocation' => $participant instanceof Participant
+                                && $this->canParticipantEditProposedDate($participant, $date),
+                            'yesCount' => $yesCount,
+                            'maybeCount' => $maybeCount,
+                            'yesNames' => $this->voterNames($date, Availability::Yes),
+                            'maybeNames' => $this->voterNames($date, Availability::Maybe),
+                            'noNames' => $this->voterNames($date, Availability::No),
+                            'reachedThreshold' => $yesCount >= config('poker.min_participants'),
+                            'myVote' => $participantVotes->get($date->id)?->value ?? null,
+                            'isConfirmed' => false,
+                            'canDelete' => $round->isPolling()
+                                && $participant instanceof Participant
+                                && $date->proposed_by_participant_id === $participant->id,
+                        ];
+                    })
+                    ->sort(function (array $a, array $b): int {
+                        $byVotes = $b['yesCount'] <=> $a['yesCount'];
+
+                        return $byVotes !== 0 ? $byVotes : $a['startsAt'] <=> $b['startsAt'];
+                    })
+                    ->values()
+                    ->all(),
             ],
             'participant' => $participant ? [
                 'id' => $participant->id,
@@ -340,6 +429,43 @@ class PokerSchedulingService
                 ])
                 ->all(),
             'subscribedCount' => Participant::query()->count(),
+            'personalUrl' => $participant
+                ? route('home', ['token' => $participant->token])
+                : null,
+        ];
+    }
+
+    /**
+     * @param  Collection<int, Availability>  $participantVotes
+     * @return array<string, mixed>
+     */
+    private function confirmedDatePayload(
+        ProposedDate $date,
+        ?Participant $participant,
+        Collection $participantVotes,
+    ): array {
+        return [
+            'id' => $date->id,
+            'startsAt' => $date->starts_at->toIso8601String(),
+            'label' => $date->starts_at
+                ->locale('fr')
+                ->translatedFormat('l j F Y \à H\hi'),
+            'location' => $date->location,
+            'theme' => $date->theme,
+            'beginnersWelcome' => $date->beginners_welcome,
+            'note' => $date->note,
+            'myVote' => $participantVotes->get($date->id)?->value,
+            'canEditLocation' => $participant instanceof Participant
+                && $this->canParticipantEditProposedDate($participant, $date),
+            'canEditNote' => $participant instanceof Participant
+                && $this->canParticipantEditNote($participant, $date),
+            'attendingCount' => $date->votes
+                ->where('availability', Availability::Yes)
+                ->count(),
+            'attendingNames' => $this->voterNames($date, Availability::Yes),
+            'declinedNames' => $this->voterNames($date, Availability::No),
+            'calendarIcsUrl' => route('poker.dates.calendar', $date),
+            'googleCalendarUrl' => ProposedDateCalendar::googleCalendarUrl($date),
         ];
     }
 
