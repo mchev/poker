@@ -115,6 +115,8 @@ class PokerDemoSeeder extends Seeder
 
         $round->update(['confirmed_proposed_date_id' => $pastDate->id]);
 
+        $pastDate->update(['winner_participant_id' => $participants['Julien']->id]);
+
         foreach (['Alex', 'Marie', 'Julien', 'Camille', 'Thomas', 'Léa'] as $name) {
             $this->vote($participants[$name], $pastDate, Availability::Yes);
         }

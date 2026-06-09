@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { Head, Link } from '@inertiajs/vue3';
-import { ArrowLeft, History } from 'lucide-vue-next';
-import PokerNameList from '@/components/poker/PokerNameList.vue';
+import { Head, Link, router } from '@inertiajs/vue3';
+import { ArrowLeft, History, Trophy } from 'lucide-vue-next';
+import { ref } from 'vue';
+import PokerController from '@/actions/App/Http/Controllers/PokerController';
 import { Badge } from '@/components/ui/badge';
 import {
     Card,
@@ -18,6 +19,11 @@ import {
 } from '@/lib/pokerUi';
 import { home } from '@/routes';
 
+type Attendee = {
+    id: number;
+    name: string;
+};
+
 type PastNight = {
     id: number;
     startsAt: string;
@@ -27,14 +33,39 @@ type PastNight = {
     beginnersWelcome: boolean;
     note: string | null;
     attendingCount: number;
-    attendingNames: string[];
-    declinedNames: string[];
+    attendees: Attendee[];
+    winnerParticipantId: number | null;
+    winnerName: string | null;
 };
 
-defineProps<{
+const props = defineProps<{
     pastNights: PastNight[];
     participant: { id: number; name: string } | null;
 }>();
+
+const updatingNightId = ref<number | null>(null);
+
+function toggleWinner(night: PastNight, attendeeId: number): void {
+    if (!props.participant) {
+        return;
+    }
+
+    const winnerParticipantId =
+        night.winnerParticipantId === attendeeId ? null : attendeeId;
+
+    updatingNightId.value = night.id;
+
+    router.patch(
+        PokerController.updatePastNightWinner.url(night.id),
+        { winner_participant_id: winnerParticipantId },
+        {
+            preserveScroll: true,
+            onFinish: () => {
+                updatingNightId.value = null;
+            },
+        },
+    );
+}
 </script>
 
 <template>
@@ -113,6 +144,13 @@ defineProps<{
                         >
                             Débutant·e·s OK
                         </Badge>
+                        <Badge
+                            v-if="night.winnerName"
+                            class="border border-amber-400/35 bg-amber-500/15 text-amber-100 hover:bg-amber-500/15"
+                        >
+                            <Trophy class="mr-1 inline size-3.5" />
+                            {{ night.winnerName }} a gagné
+                        </Badge>
                     </div>
                     <p
                         v-if="night.note"
@@ -121,17 +159,84 @@ defineProps<{
                         {{ night.note }}
                     </p>
 
-                    <div class="mt-4 grid gap-3 sm:grid-cols-2">
-                        <PokerNameList
-                            :names="night.attendingNames"
-                            label="Étaient là"
-                            label-class="text-amber-300/90"
-                        />
-                        <PokerNameList
-                            :names="night.declinedNames"
-                            label="Absents"
-                            label-class="text-stone-400"
-                        />
+                    <div class="mt-4 space-y-2">
+                        <p
+                            class="text-xs font-semibold uppercase tracking-wide text-amber-300/90"
+                        >
+                            {{
+                                participant
+                                    ? 'Étaient là — coche le gagnant'
+                                    : 'Étaient là'
+                            }}
+                        </p>
+
+                        <p
+                            v-if="night.attendees.length === 0"
+                            class="text-sm text-white/60"
+                        >
+                            —
+                        </p>
+
+                        <ul v-else class="space-y-2">
+                            <li
+                                v-for="attendee in night.attendees"
+                                :key="attendee.id"
+                            >
+                                <label
+                                    v-if="participant"
+                                    class="flex cursor-pointer items-center gap-3 rounded-lg border border-white/10 bg-black/35 px-3 py-2.5 transition-colors hover:bg-black/50"
+                                    :class="{
+                                        'border-amber-400/35 bg-amber-500/10':
+                                            night.winnerParticipantId ===
+                                            attendee.id,
+                                    }"
+                                >
+                                    <input
+                                        type="checkbox"
+                                        class="size-5 shrink-0 rounded border-white/20 bg-black/50 text-amber-500 focus:ring-amber-400/40"
+                                        :checked="
+                                            night.winnerParticipantId ===
+                                            attendee.id
+                                        "
+                                        :disabled="
+                                            updatingNightId === night.id
+                                        "
+                                        @change="toggleWinner(night, attendee.id)"
+                                    />
+                                    <span
+                                        class="flex flex-1 items-center gap-2 text-sm text-white/90"
+                                    >
+                                        {{ attendee.name }}
+                                        <Trophy
+                                            v-if="
+                                                night.winnerParticipantId ===
+                                                attendee.id
+                                            "
+                                            class="size-4 text-amber-300"
+                                        />
+                                    </span>
+                                </label>
+
+                                <p
+                                    v-else
+                                    class="rounded-lg border border-white/10 bg-black/35 px-3 py-2 text-sm text-white/85"
+                                    :class="{
+                                        'border-amber-400/35 bg-amber-500/10 font-semibold text-amber-100':
+                                            night.winnerParticipantId ===
+                                            attendee.id,
+                                    }"
+                                >
+                                    <Trophy
+                                        v-if="
+                                            night.winnerParticipantId ===
+                                            attendee.id
+                                        "
+                                        class="mr-1.5 inline size-4 text-amber-300"
+                                    />
+                                    {{ attendee.name }}
+                                </p>
+                            </li>
+                        </ul>
                     </div>
                 </article>
             </CardContent>

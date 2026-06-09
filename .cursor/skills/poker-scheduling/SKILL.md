@@ -11,10 +11,11 @@ description: "Organisation de soirées poker sans compte utilisateur. Activates 
 - **Email is the source of truth** — re-subscribing with the same address reuses the existing participant and token (votes and proposals are preserved). Emails are normalized (lowercase, trimmed).
 - Location and optional notes are shown on the public page for proposed/confirmed dates; participants can edit location (polling or confirmed) and add a note once confirmed.
 - **Beginners welcome** defaults to `true` on new proposals (`beginners_welcome`).
-- Auto-confirm a proposed date when it reaches `POKER_MIN_PARTICIPANTS` (default 4) **yes** votes (`confirmed_at` on the date). The poll stays open: other future dates remain visible and votable, and new dates can still be proposed.
+- Auto-confirm a proposed date when it reaches `POKER_MIN_PARTICIPANTS` (default 3) **yes** votes (`confirmed_at` on the date). The poll stays open: other future dates remain visible and votable, and new dates can still be proposed.
 - When several dates are confirmed in one batch, participants receive **one digest e-mail** (not one per date).
 - Poll dates are sorted by **yes count descending**, then by start time.
 - Confirmed dates expose **calendar links** (`.ics` download + Google Calendar URL).
+- The day before an **unconfirmed** poll date (`starts_at` tomorrow, below `POKER_MIN_PARTICIPANTS` yes votes), a **vote reminder** e-mail is sent once to participants who have not voted on that date (`vote_reminder_sent_at` on the date).
 - A round closes when a **confirmed** date has taken place (`starts_at` in the past). Future proposed dates carry over to the next polling round. No email is sent when the poll continues.
 - Voter **names** are shown on poll cards and confirmed cards (yes / maybe / no lists).
 
@@ -29,7 +30,7 @@ description: "Organisation de soirées poker sans compte utilisateur. Activates 
 | Page | `resources/js/pages/Poker/Index.vue` |
 | Config | `config/poker.php` |
 | Mails | `app/Mail/*`, `resources/views/mail/poker/*` |
-| Scheduler | `poker:complete-past-tournaments` (hourly) |
+| Scheduler | `poker:complete-past-tournaments` (hourly), `poker:send-vote-reminders` (daily 10:00) |
 
 ## Email (Brevo)
 
@@ -50,7 +51,7 @@ BREVO_LIST_ID=65
 
 The **local `.env` often uses the same `BREVO_API_KEY` as production**. Never send test notifications to the full participant list.
 
-- In `local`, `PokerMailDispatcher` redirects **participant** e-mails to `POKER_LOCAL_MAIL_REDIRECT` (default `martin@pegase.io`).
+- In `local`, `PokerMailDispatcher` redirects **participant** e-mails to `POKER_LOCAL_MAIL_REDIRECT` (default `martin@pegase.io`) and sends them **synchronously** (no `queue:work` required).
 - `BrevoContactService::syncParticipant()` is **skipped** in `local` (no writes to list `#65`).
 - Tests must always use `Mail::fake()` — never rely on real sends.
 - For manual local checks, only use `martin@pegase.io` (or override `POKER_LOCAL_MAIL_REDIRECT`).

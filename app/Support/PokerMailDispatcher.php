@@ -10,7 +10,15 @@ final class PokerMailDispatcher
 {
     public static function queue(string $email, Mailable $mailable, bool $redirectInLocal = true): void
     {
-        Mail::to(self::resolveRecipient($email, $redirectInLocal))->queue($mailable);
+        $pending = Mail::to(self::resolveRecipient($email, $redirectInLocal));
+
+        if (self::shouldSendSynchronously()) {
+            $pending->sendNow($mailable);
+
+            return;
+        }
+
+        $pending->queue($mailable);
     }
 
     public static function queueToParticipant(Participant $participant, Mailable $mailable): void
@@ -31,5 +39,10 @@ final class PokerMailDispatcher
     {
         return config('poker.redirect_mail_in_local')
             && app()->environment('local');
+    }
+
+    public static function shouldSendSynchronously(): bool
+    {
+        return app()->environment('local');
     }
 }

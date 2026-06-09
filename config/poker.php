@@ -12,7 +12,7 @@ return [
     |
     */
 
-    'min_participants' => (int) env('POKER_MIN_PARTICIPANTS', 4),
+    'min_participants' => (int) env('POKER_MIN_PARTICIPANTS', 3),
 
     /*
     |--------------------------------------------------------------------------

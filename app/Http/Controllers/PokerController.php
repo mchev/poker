@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Http\Requests\ResendAccessLinkRequest;
 use App\Http\Requests\StoreAttendanceRequest;
+use App\Http\Requests\StorePastNightWinnerRequest;
 use App\Http\Requests\StoreProposedDateRequest;
 use App\Http\Requests\StoreVotesRequest;
 use App\Http\Requests\SubscribeParticipantRequest;
@@ -163,6 +164,21 @@ class PokerController extends Controller
         return back()->with('toast', [
             'type' => 'success',
             'message' => 'Lien renvoyé ! Jette un œil à ta boîte mail.',
+        ]);
+    }
+
+    public function updatePastNightWinner(
+        StorePastNightWinnerRequest $request,
+        ProposedDate $proposedDate,
+    ): RedirectResponse {
+        $this->scheduling->setPastNightWinner(
+            $proposedDate,
+            $request->validated('winner_participant_id'),
+        );
+
+        return back()->with('toast', [
+            'type' => 'success',
+            'message' => 'Gagnant enregistré.',
         ]);
     }
 

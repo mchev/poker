@@ -8,6 +8,7 @@ use App\Mail\AdminParticipantSubscribedMail;
 use App\Mail\NewProposedDateMail;
 use App\Mail\ParticipantWelcomeMail;
 use App\Mail\TournamentsConfirmedMail;
+use App\Mail\VoteReminderMail;
 use App\Models\Participant;
 use App\Models\ProposedDate;
 use App\Models\SchedulingRound;
@@ -307,6 +308,56 @@ class PokerSchedulingService
         return $completed;
     }
 
+    public function sendVoteReminders(): int
+    {
+        $round = $this->activeRound();
+
+        if (! $round->isPolling()) {
+            return 0;
+        }
+
+        $threshold = config('poker.min_participants');
+        $tomorrow = Carbon::now()->timezone(config('app.timezone'))->addDay()->toDateString();
+
+        $dates = ProposedDate::query()
+            ->where('scheduling_round_id', $round->id)
+            ->whereNull('confirmed_at')
+            ->whereNull('vote_reminder_sent_at')
+            ->whereDate('starts_at', $tomorrow)
+            ->with(['votes'])
+            ->withCount([
+                'votes as yes_count' => fn ($query) => $query->where('availability', Availability::Yes),
+            ])
+            ->get()
+            ->filter(fn (ProposedDate $date): bool => $date->yes_count < $threshold);
+
+        $sent = 0;
+
+        foreach ($dates as $date) {
+            $votedParticipantIds = $date->votes->pluck('participant_id');
+
+            Participant::query()
+                ->whereNotIn('id', $votedParticipantIds)
+                ->each(function (Participant $participant) use ($date, $threshold, &$sent): void {
+                    PokerMailDispatcher::queueToParticipant(
+                        $participant,
+                        new VoteReminderMail(
+                            participant: $participant,
+                            proposedDate: $date,
+                            yesCount: $date->yes_count,
+                            threshold: $threshold,
+                        ),
+                    );
+
+                    $sent++;
+                });
+
+            $date->update(['vote_reminder_sent_at' => now()]);
+        }
+
+        return $sent;
+    }
+
     /**
      * @return array<string, mixed>
      */
@@ -317,7 +368,7 @@ class PokerSchedulingService
         $pastNights = ProposedDate::query()
             ->whereNotNull('confirmed_at')
             ->where('starts_at', '<', now())
-            ->with(['votes.participant'])
+            ->with(['votes.participant', 'winner'])
             ->orderByDesc('starts_at')
             ->get()
             ->map(fn (ProposedDate $confirmedDate): array => [
@@ -333,8 +384,17 @@ class PokerSchedulingService
                 'attendingCount' => $confirmedDate->votes
                     ->where('availability', Availability::Yes)
                     ->count(),
-                'attendingNames' => $this->voterNames($confirmedDate, Availability::Yes),
-                'declinedNames' => $this->voterNames($confirmedDate, Availability::No),
+                'attendees' => $confirmedDate->votes
+                    ->where('availability', Availability::Yes)
+                    ->map(fn (Vote $vote): array => [
+                        'id' => $vote->participant_id,
+                        'name' => $vote->participant->name,
+                    ])
+                    ->sortBy('name')
+                    ->values()
+                    ->all(),
+                'winnerParticipantId' => $confirmedDate->winner_participant_id,
+                'winnerName' => $confirmedDate->winner?->name,
             ])
             ->all();
 
@@ -345,6 +405,16 @@ class PokerSchedulingService
                 'name' => $participant->name,
             ] : null,
         ];
+    }
+
+    public function setPastNightWinner(ProposedDate $proposedDate, ?int $winnerParticipantId): ProposedDate
+    {
+        abort_unless($proposedDate->isConfirmed(), 404);
+        abort_unless($proposedDate->starts_at->isPast(), 403, 'Le gagnant ne peut être choisi que pour une soirée passée.');
+
+        $proposedDate->update(['winner_participant_id' => $winnerParticipantId]);
+
+        return $proposedDate->fresh();
     }
 
     /**

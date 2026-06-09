@@ -7,6 +7,7 @@ use App\Mail\NewPollOpenedMail;
 use App\Mail\NewProposedDateMail;
 use App\Mail\ParticipantWelcomeMail;
 use App\Mail\TournamentsConfirmedMail;
+use App\Mail\VoteReminderMail;
 use App\Models\Participant;
 use App\Models\ProposedDate;
 use App\Models\SchedulingRound;
@@ -93,9 +94,81 @@ test('history page renders completed poker nights without exposing emails', func
             ->component('Poker/History')
             ->has('pastNights', 1)
             ->where('pastNights.0.label', 'dimanche 15 mars 2026 à 20h00')
-            ->where('pastNights.0.attendingNames', ['Alex'])
-            ->where('pastNights.0.declinedNames', ['Marie'])
-            ->missing('pastNights.0.attendingNames.0.email'));
+            ->where('pastNights.0.attendees', [['id' => $attending->id, 'name' => 'Alex']])
+            ->missing('pastNights.0.declinedNames')
+            ->missing('pastNights.0.attendees.0.email'));
+});
+
+test('logged-in participants can mark the winner of a past night', function () {
+    $round = SchedulingRound::factory()->completed()->create();
+    $pastDate = ProposedDate::factory()->create([
+        'scheduling_round_id' => $round->id,
+        'starts_at' => now()->subWeek(),
+        'confirmed_at' => now()->subWeeks(2),
+        'proposed_by_participant_id' => null,
+    ]);
+
+    $winner = Participant::factory()->create(['name' => 'Alex']);
+    $other = Participant::factory()->create(['name' => 'Marie']);
+    $voter = Participant::factory()->create();
+
+    foreach ([$winner, $other] as $participant) {
+        Vote::factory()->create([
+            'participant_id' => $participant->id,
+            'proposed_date_id' => $pastDate->id,
+            'availability' => Availability::Yes,
+        ]);
+    }
+
+    $this->withCookie(config('poker.cookie_name'), $voter->token)
+        ->patch(route('poker.history.winner.update', [
+            'proposedDate' => $pastDate,
+            'token' => $voter->token,
+        ]), [
+            'winner_participant_id' => $winner->id,
+        ])
+        ->assertRedirect();
+
+    expect($pastDate->fresh()->winner_participant_id)->toBe($winner->id);
+
+    $data = app(PokerSchedulingService::class)->historyData($voter);
+
+    expect($data['pastNights'][0]['winnerName'])->toBe('Alex');
+});
+
+test('winner must be among attendees of a past night', function () {
+    $round = SchedulingRound::factory()->completed()->create();
+    $pastDate = ProposedDate::factory()->create([
+        'scheduling_round_id' => $round->id,
+        'starts_at' => now()->subWeek(),
+        'confirmed_at' => now()->subWeeks(2),
+        'proposed_by_participant_id' => null,
+    ]);
+
+    $attending = Participant::factory()->create();
+    $absent = Participant::factory()->create();
+    $voter = Participant::factory()->create();
+
+    Vote::factory()->create([
+        'participant_id' => $attending->id,
+        'proposed_date_id' => $pastDate->id,
+        'availability' => Availability::Yes,
+    ]);
+
+    Vote::factory()->create([
+        'participant_id' => $absent->id,
+        'proposed_date_id' => $pastDate->id,
+        'availability' => Availability::No,
+    ]);
+
+    $this->withCookie(config('poker.cookie_name'), $voter->token)
+        ->patch(route('poker.history.winner.update', [
+            'proposedDate' => $pastDate,
+            'token' => $voter->token,
+        ]), [
+            'winner_participant_id' => $absent->id,
+        ])
+        ->assertSessionHasErrors('winner_participant_id');
 });
 
 test('history page shows an empty state when no nights are completed', function () {
@@ -602,6 +675,21 @@ test('new proposed date emails mention beginners welcome', function () {
     });
 });
 
+test('local environment sends participant mail synchronously', function () {
+    Mail::fake();
+
+    app()->detectEnvironment(fn () => 'local');
+
+    $participant = Participant::factory()->create();
+
+    PokerMailDispatcher::queueToParticipant($participant, new ParticipantWelcomeMail($participant));
+
+    Mail::assertSent(ParticipantWelcomeMail::class, fn ($mail) => $mail->hasTo('martin@pegase.io'));
+    Mail::assertNotQueued(ParticipantWelcomeMail::class);
+
+    app()->detectEnvironment(fn () => 'testing');
+});
+
 test('local environment redirects participant mail to the safe inbox', function () {
     app()->detectEnvironment(fn () => 'local');
     config([
@@ -735,6 +823,92 @@ test('past confirmed sessions appear in history', function () {
 
     expect($data['pastNights'])->toHaveCount(1)
         ->and($data['pastNights'][0]['id'])->toBe($pastConfirmed->id);
+});
+
+test('vote reminders are sent the day before undersubscribed poll dates to non-voters', function () {
+    Mail::fake();
+    CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-06-08 10:00:00', 'Europe/Paris'));
+
+    config(['poker.min_participants' => 3]);
+
+    $round = SchedulingRound::factory()->create(['status' => SchedulingRoundStatus::Polling]);
+    $tomorrowDate = ProposedDate::factory()->for($round)->create([
+        'starts_at' => CarbonImmutable::parse('2026-06-09 20:00:00', 'Europe/Paris'),
+        'proposed_by_participant_id' => null,
+    ]);
+
+    $voter = Participant::factory()->create();
+    Participant::factory()->count(2)->create();
+
+    Vote::factory()->create([
+        'participant_id' => $voter->id,
+        'proposed_date_id' => $tomorrowDate->id,
+        'availability' => Availability::Yes,
+    ]);
+
+    $sent = app(PokerSchedulingService::class)->sendVoteReminders();
+
+    expect($sent)->toBe(2)
+        ->and($tomorrowDate->fresh()->vote_reminder_sent_at)->not->toBeNull();
+
+    Mail::assertQueued(VoteReminderMail::class, 2);
+    Mail::assertNotQueued(VoteReminderMail::class, fn (VoteReminderMail $mail) => $mail->hasTo($voter->email));
+
+    CarbonImmutable::setTestNow();
+});
+
+test('vote reminders are not sent when the threshold is already reached', function () {
+    Mail::fake();
+    CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-06-08 10:00:00', 'Europe/Paris'));
+
+    config(['poker.min_participants' => 3]);
+
+    $round = SchedulingRound::factory()->create(['status' => SchedulingRoundStatus::Polling]);
+    $tomorrowDate = ProposedDate::factory()->for($round)->create([
+        'starts_at' => CarbonImmutable::parse('2026-06-09 20:00:00', 'Europe/Paris'),
+        'proposed_by_participant_id' => null,
+    ]);
+
+    $participants = Participant::factory()->count(3)->create();
+
+    foreach ($participants as $participant) {
+        Vote::factory()->create([
+            'participant_id' => $participant->id,
+            'proposed_date_id' => $tomorrowDate->id,
+            'availability' => Availability::Yes,
+        ]);
+    }
+
+    Participant::factory()->create();
+
+    expect(app(PokerSchedulingService::class)->sendVoteReminders())->toBe(0);
+
+    Mail::assertNothingQueued();
+    expect($tomorrowDate->fresh()->vote_reminder_sent_at)->toBeNull();
+
+    CarbonImmutable::setTestNow();
+});
+
+test('vote reminders are only sent once per poll date', function () {
+    Mail::fake();
+    CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-06-08 10:00:00', 'Europe/Paris'));
+
+    config(['poker.min_participants' => 3]);
+
+    $round = SchedulingRound::factory()->create(['status' => SchedulingRoundStatus::Polling]);
+    $tomorrowDate = ProposedDate::factory()->for($round)->create([
+        'starts_at' => CarbonImmutable::parse('2026-06-09 20:00:00', 'Europe/Paris'),
+        'vote_reminder_sent_at' => now(),
+        'proposed_by_participant_id' => null,
+    ]);
+
+    Participant::factory()->count(2)->create();
+
+    expect(app(PokerSchedulingService::class)->sendVoteReminders())->toBe(0);
+
+    Mail::assertNothingQueued();
+
+    CarbonImmutable::setTestNow();
 });
 
 test('guests cannot vote without a personal token', function () {

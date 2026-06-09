@@ -9,7 +9,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-#[Fillable(['scheduling_round_id', 'starts_at', 'location', 'theme', 'beginners_welcome', 'note', 'confirmed_at', 'proposed_by_participant_id'])]
+#[Fillable(['scheduling_round_id', 'starts_at', 'location', 'theme', 'beginners_welcome', 'note', 'confirmed_at', 'vote_reminder_sent_at', 'proposed_by_participant_id', 'winner_participant_id'])]
 class ProposedDate extends Model
 {
     /** @use HasFactory<ProposedDateFactory> */
@@ -23,6 +23,7 @@ class ProposedDate extends Model
         return [
             'starts_at' => 'datetime',
             'confirmed_at' => 'datetime',
+            'vote_reminder_sent_at' => 'datetime',
             'beginners_welcome' => 'boolean',
         ];
     }
@@ -46,6 +47,14 @@ class ProposedDate extends Model
     public function proposedBy(): BelongsTo
     {
         return $this->belongsTo(Participant::class, 'proposed_by_participant_id');
+    }
+
+    /**
+     * @return BelongsTo<Participant, $this>
+     */
+    public function winner(): BelongsTo
+    {
+        return $this->belongsTo(Participant::class, 'winner_participant_id');
     }
 
     /**
