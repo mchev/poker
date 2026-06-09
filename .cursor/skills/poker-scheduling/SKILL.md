@@ -16,6 +16,7 @@ description: "Organisation de soirées poker sans compte utilisateur. Activates 
 - Poll dates are sorted by **yes count descending**, then by start time.
 - Confirmed dates expose **calendar links** (`.ics` download + Google Calendar URL).
 - The day before an **unconfirmed** poll date (`starts_at` tomorrow, below `POKER_MIN_PARTICIPANTS` yes votes), a **vote reminder** e-mail is sent once to participants who have not voted on that date (`vote_reminder_sent_at` on the date).
+- Any logged-in participant can **manually remind non-voters** for a poll date via `POST /dates/{proposedDate}/relance` (button on poll cards).
 - A round closes when a **confirmed** date has taken place (`starts_at` in the past). Future proposed dates carry over to the next polling round. No email is sent when the poll continues.
 - Voter **names** are shown on poll cards and confirmed cards (yes / maybe / no lists).
 
@@ -25,6 +26,7 @@ description: "Organisation de soirées poker sans compte utilisateur. Activates 
 |------|------|
 | Service (business logic) | `app/Services/PokerSchedulingService.php` |
 | Mail dispatch + local safety | `app/Support/PokerMailDispatcher.php` |
+| Mail failure logging | `app/Listeners/LogPokerMailQueueFailure.php` |
 | Calendar export | `app/Support/ProposedDateCalendar.php` |
 | Public controller | `app/Http/Controllers/PokerController.php` |
 | Page | `resources/js/pages/Poker/Index.vue` |
@@ -35,6 +37,14 @@ description: "Organisation de soirées poker sans compte utilisateur. Activates 
 ## Email (Brevo)
 
 Transactional e-mails use Laravel's **Brevo API transport** (`symfony/brevo-mailer`). All poker mailables implement `ShouldQueue` and are dispatched via `PokerMailDispatcher`.
+
+### Production queue worker (critical)
+
+In **production**, mails are **queued** (`PokerMailDispatcher` only sends synchronously in `local`). A worker must process the queue (`php artisan queue:work`, Horizon, or Laravel Cloud queue) — otherwise confirmation and reminder e-mails never leave the queue.
+
+### Observability
+
+All poker mail dispatches are logged (`Poker mail queued` / `Poker mail sent synchronously`). Failures are logged as `Poker mail dispatch failed.` (sync) or `Poker mail queue job failed.` (failed queue jobs). Confirmation batches log `Poker dates confirmed, dispatching confirmation emails.` Check `storage/logs/laravel.log` (or your platform log drain).
 
 ```
 MAIL_MAILER=brevo

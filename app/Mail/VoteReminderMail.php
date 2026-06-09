@@ -20,6 +20,7 @@ class VoteReminderMail extends Mailable implements ShouldQueue
         public ProposedDate $proposedDate,
         public int $yesCount,
         public int $threshold,
+        public bool $manual = false,
     ) {
         $this->afterCommit();
     }
@@ -27,7 +28,9 @@ class VoteReminderMail extends Mailable implements ShouldQueue
     public function envelope(): Envelope
     {
         return new Envelope(
-            subject: 'Demain c’est peut-être poker — ton avis manque encore',
+            subject: $this->manual
+                ? 'Ton avis manque pour le prochain poker'
+                : 'Demain c’est peut-être poker — ton avis manque encore',
         );
     }
 
@@ -48,6 +51,7 @@ class VoteReminderMail extends Mailable implements ShouldQueue
                 'yesCount' => $this->yesCount,
                 'threshold' => $this->threshold,
                 'missingCount' => $missing,
+                'manual' => $this->manual,
                 'url' => route('home', ['token' => $this->participant->token]),
             ],
         );

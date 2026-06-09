@@ -154,6 +154,23 @@ class PokerController extends Controller
         ]);
     }
 
+    public function remindNonVoters(Request $request, ProposedDate $proposedDate): RedirectResponse
+    {
+        /** @var Participant|null $participant */
+        $participant = $request->attributes->get('poker_participant');
+
+        abort_unless($participant instanceof Participant, 403);
+
+        $sent = $this->scheduling->remindNonVoters($participant, $proposedDate);
+
+        return back()->with('toast', [
+            'type' => 'success',
+            'message' => $sent > 0
+                ? "Relance envoyée à {$sent} personne".($sent > 1 ? 's' : '').'.'
+                : 'Tout le monde a déjà voté pour ce créneau.',
+        ]);
+    }
+
     public function resendAccessLink(ResendAccessLinkRequest $request): RedirectResponse
     {
         /** @var Participant $participant */

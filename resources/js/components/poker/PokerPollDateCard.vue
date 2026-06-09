@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Form } from '@inertiajs/vue3';
-import { CalendarPlus, Check, Pencil, Trash2, X } from 'lucide-vue-next';
+import { CalendarPlus, Check, Mail, Pencil, Trash2, X } from 'lucide-vue-next';
 import { computed } from 'vue';
 import PokerController from '@/actions/App/Http/Controllers/PokerController';
 import PokerLocationFields from '@/components/poker/PokerLocationFields.vue';
@@ -30,6 +30,8 @@ type PollDate = {
     myVote: string | null;
     canDelete: boolean;
     canEditLocation: boolean;
+    canRemindNonVoters: boolean;
+    nonVoterCount: number;
 };
 
 const props = defineProps<{
@@ -134,6 +136,22 @@ const voteOptions = [
                     <Pencil class="mr-1.5 size-4" />
                     {{ isEditingLocation ? 'Annuler' : 'Lieu' }}
                 </Button>
+                <Form
+                    v-if="date.canRemindNonVoters"
+                    v-bind="PokerController.remindNonVoters.form(date.id)"
+                    class="contents"
+                    v-slot="{ processing }"
+                >
+                    <Button
+                        type="submit"
+                        variant="ghost"
+                        class="h-9 border border-white/10 bg-black/30 px-3 text-white/60 hover:bg-sky-500/10 hover:text-sky-100"
+                        :disabled="processing"
+                    >
+                        <Mail class="mr-1.5 size-4" />
+                        Relancer ({{ date.nonVoterCount }})
+                    </Button>
+                </Form>
                 <Button
                     v-if="date.canDelete"
                     type="button"

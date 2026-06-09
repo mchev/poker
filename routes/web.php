@@ -31,6 +31,9 @@ Route::middleware(ResolvePokerParticipant::class)->group(function (): void {
     Route::delete('/dates/{proposedDate}', [PokerController::class, 'destroyProposedDate'])
         ->middleware('throttle:20,1')
         ->name('poker.dates.destroy');
+    Route::post('/dates/{proposedDate}/relance', [PokerController::class, 'remindNonVoters'])
+        ->middleware('throttle:10,1')
+        ->name('poker.dates.remind');
     Route::post('/presence', [PokerController::class, 'storeAttendance'])
         ->middleware('throttle:30,1')
         ->name('poker.attendance.store');

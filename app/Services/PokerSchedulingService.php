@@ -18,6 +18,7 @@ use App\Support\ProposedDateCalendar;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 class PokerSchedulingService
 {
@@ -245,6 +246,15 @@ class PokerSchedulingService
         }
 
         if ($confirmedDates->isNotEmpty()) {
+            $participantCount = Participant::query()->count();
+
+            Log::info('Poker dates confirmed, dispatching confirmation emails.', [
+                'round_id' => $round->id,
+                'date_ids' => $confirmedDates->pluck('id')->all(),
+                'participant_count' => $participantCount,
+                'queue_connection' => config('queue.default'),
+            ]);
+
             Participant::query()->each(function (Participant $participant) use ($confirmedDates): void {
                 PokerMailDispatcher::queueToParticipant(
                     $participant,
@@ -252,6 +262,25 @@ class PokerSchedulingService
                 );
             });
         }
+    }
+
+    public function remindNonVoters(Participant $actor, ProposedDate $proposedDate): int
+    {
+        $round = $this->activeRound();
+
+        abort_unless($round->isPolling(), 403);
+        abort_unless(! $proposedDate->isConfirmed(), 403);
+        abort_unless($proposedDate->scheduling_round_id === $round->id, 404);
+
+        $sent = $this->dispatchVoteRemindersForDate($proposedDate, manual: true);
+
+        Log::info('Poker manual vote reminder triggered.', [
+            'proposed_date_id' => $proposedDate->id,
+            'triggered_by_participant_id' => $actor->id,
+            'sent_count' => $sent,
+        ]);
+
+        return $sent;
     }
 
     public function completePastTournaments(): int
@@ -334,26 +363,46 @@ class PokerSchedulingService
         $sent = 0;
 
         foreach ($dates as $date) {
-            $votedParticipantIds = $date->votes->pluck('participant_id');
-
-            Participant::query()
-                ->whereNotIn('id', $votedParticipantIds)
-                ->each(function (Participant $participant) use ($date, $threshold, &$sent): void {
-                    PokerMailDispatcher::queueToParticipant(
-                        $participant,
-                        new VoteReminderMail(
-                            participant: $participant,
-                            proposedDate: $date,
-                            yesCount: $date->yes_count,
-                            threshold: $threshold,
-                        ),
-                    );
-
-                    $sent++;
-                });
-
+            $sent += $this->dispatchVoteRemindersForDate($date);
             $date->update(['vote_reminder_sent_at' => now()]);
         }
+
+        if ($sent > 0) {
+            Log::info('Poker automatic vote reminders dispatched.', [
+                'sent_count' => $sent,
+                'round_id' => $round->id,
+            ]);
+        }
+
+        return $sent;
+    }
+
+    private function dispatchVoteRemindersForDate(ProposedDate $proposedDate, bool $manual = false): int
+    {
+        $proposedDate->loadMissing('votes');
+
+        $threshold = config('poker.min_participants');
+        $yesCount = $proposedDate->votes->where('availability', Availability::Yes)->count();
+        $votedParticipantIds = $proposedDate->votes->pluck('participant_id');
+
+        $sent = 0;
+
+        Participant::query()
+            ->whereNotIn('id', $votedParticipantIds)
+            ->each(function (Participant $participant) use ($proposedDate, $threshold, $yesCount, $manual, &$sent): void {
+                PokerMailDispatcher::queueToParticipant(
+                    $participant,
+                    new VoteReminderMail(
+                        participant: $participant,
+                        proposedDate: $proposedDate,
+                        yesCount: $yesCount,
+                        threshold: $threshold,
+                        manual: $manual,
+                    ),
+                );
+
+                $sent++;
+            });
 
         return $sent;
     }
@@ -452,6 +501,8 @@ class PokerSchedulingService
                     ->map(function (ProposedDate $date) use ($participantVotes, $round, $participant): array {
                         $yesCount = $date->votes->where('availability', Availability::Yes)->count();
                         $maybeCount = $date->votes->where('availability', Availability::Maybe)->count();
+                        $votedCount = $date->votes->pluck('participant_id')->unique()->count();
+                        $nonVoterCount = max(0, Participant::query()->count() - $votedCount);
 
                         return [
                             'id' => $date->id,
@@ -476,6 +527,10 @@ class PokerSchedulingService
                             'canDelete' => $round->isPolling()
                                 && $participant instanceof Participant
                                 && $date->proposed_by_participant_id === $participant->id,
+                            'nonVoterCount' => $nonVoterCount,
+                            'canRemindNonVoters' => $round->isPolling()
+                                && $participant instanceof Participant
+                                && $nonVoterCount > 0,
                         ];
                     })
                     ->sort(function (array $a, array $b): int {

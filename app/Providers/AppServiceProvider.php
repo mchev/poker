@@ -2,9 +2,12 @@
 
 namespace App\Providers;
 
+use App\Listeners\LogPokerMailQueueFailure;
 use Carbon\CarbonImmutable;
+use Illuminate\Queue\Events\JobFailed;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Validation\Rules\Password;
@@ -29,6 +32,12 @@ class AppServiceProvider extends ServiceProvider
     {
         $this->registerBrevoMailTransport();
         $this->configureDefaults();
+        $this->registerPokerMailLogging();
+    }
+
+    protected function registerPokerMailLogging(): void
+    {
+        Event::listen(JobFailed::class, LogPokerMailQueueFailure::class);
     }
 
     protected function registerBrevoMailTransport(): void

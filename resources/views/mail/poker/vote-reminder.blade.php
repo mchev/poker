@@ -1,7 +1,11 @@
 <x-mail::message>
 # Salut {{ $name }} !
 
+@if ($manual)
+**{{ $dateLabel }}** a besoin de votes pour être calé : **{{ $yesCount }}/{{ $threshold }}**.
+@else
 **{{ $dateLabel }}** approche et ce créneau n’a pas encore assez de partants pour être calé : **{{ $yesCount }}/{{ $threshold }}**.
+@endif
 
 @if ($missingCount > 0)
 Il manque encore **{{ $missingCount }}** {{ $missingCount > 1 ? 'partants' : 'partant' }} pour valider la soirée.

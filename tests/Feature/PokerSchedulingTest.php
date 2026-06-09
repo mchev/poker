@@ -18,6 +18,7 @@ use App\Support\PokerMailDispatcher;
 use App\Support\ProposedDateCalendar;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 
 test('proposed dates keep the local time entered in the form', function () {
@@ -909,6 +910,105 @@ test('vote reminders are only sent once per poll date', function () {
     Mail::assertNothingQueued();
 
     CarbonImmutable::setTestNow();
+});
+
+test('participants can manually remind non-voters for a poll date', function () {
+    Mail::fake();
+
+    config(['poker.min_participants' => 3]);
+
+    $round = SchedulingRound::factory()->create(['status' => SchedulingRoundStatus::Polling]);
+    $pollDate = ProposedDate::factory()->for($round)->create([
+        'starts_at' => CarbonImmutable::parse('2026-06-20 20:00:00', 'Europe/Paris'),
+        'proposed_by_participant_id' => null,
+    ]);
+
+    $actor = Participant::factory()->create();
+    $voter = Participant::factory()->create();
+    Participant::factory()->count(2)->create();
+
+    Vote::factory()->create([
+        'participant_id' => $voter->id,
+        'proposed_date_id' => $pollDate->id,
+        'availability' => Availability::Yes,
+    ]);
+
+    $this->withCookie(config('poker.cookie_name'), $actor->token)
+        ->post(route('poker.dates.remind', [
+            'token' => $actor->token,
+            'proposedDate' => $pollDate,
+        ]))
+        ->assertRedirect()
+        ->assertSessionHas('toast.message', 'Relance envoyée à 3 personnes.');
+
+    Mail::assertQueued(VoteReminderMail::class, 3);
+    Mail::assertQueued(
+        VoteReminderMail::class,
+        fn (VoteReminderMail $mail) => $mail->manual === true,
+    );
+    Mail::assertNotQueued(VoteReminderMail::class, fn (VoteReminderMail $mail) => $mail->hasTo($voter->email));
+});
+
+test('manual vote reminders are not sent for confirmed dates', function () {
+    Mail::fake();
+
+    $round = SchedulingRound::factory()->create(['status' => SchedulingRoundStatus::Polling]);
+    $confirmedDate = ProposedDate::factory()->for($round)->create([
+        'confirmed_at' => now(),
+        'proposed_by_participant_id' => null,
+    ]);
+
+    $actor = Participant::factory()->create();
+
+    $this->withCookie(config('poker.cookie_name'), $actor->token)
+        ->post(route('poker.dates.remind', [
+            'token' => $actor->token,
+            'proposedDate' => $confirmedDate,
+        ]))
+        ->assertForbidden();
+
+    Mail::assertNothingQueued();
+});
+
+test('guests cannot manually remind non-voters', function () {
+    $round = SchedulingRound::factory()->create(['status' => SchedulingRoundStatus::Polling]);
+    $pollDate = ProposedDate::factory()->for($round)->create([
+        'proposed_by_participant_id' => null,
+    ]);
+
+    $this->post(route('poker.dates.remind', $pollDate))
+        ->assertForbidden();
+});
+
+test('poker mail dispatch is logged when queuing confirmation emails', function () {
+    Log::spy();
+    Mail::fake();
+
+    config(['poker.min_participants' => 2]);
+
+    $round = SchedulingRound::factory()->create(['status' => SchedulingRoundStatus::Polling]);
+    $pollDate = ProposedDate::factory()->for($round)->create([
+        'proposed_by_participant_id' => null,
+    ]);
+
+    $participants = Participant::factory()->count(2)->create();
+
+    foreach ($participants as $participant) {
+        Vote::factory()->create([
+            'participant_id' => $participant->id,
+            'proposed_date_id' => $pollDate->id,
+            'availability' => Availability::Yes,
+        ]);
+    }
+
+    app(PokerSchedulingService::class)->attemptConfirmation($round->fresh());
+
+    Log::shouldHaveReceived('info')
+        ->with('Poker dates confirmed, dispatching confirmation emails.', Mockery::on(
+            fn (array $context): bool => $context['round_id'] === $round->id
+                && $context['participant_count'] === 2
+                && in_array($pollDate->id, $context['date_ids'], true),
+        ));
 });
 
 test('guests cannot vote without a personal token', function () {
