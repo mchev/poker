@@ -8,8 +8,9 @@ description: "Organisation de soirées poker sans compte utilisateur. Activates 
 ## Product Rules
 
 - No Fortify login required for participants — identify via a 64-char `token` (query param or `poker_token` cookie).
-- **Email is the source of truth** — re-subscribing with the same address reuses the existing participant and token (votes and proposals are preserved). Emails are normalized (lowercase, trimmed).
-- Location and optional notes are shown on the public page for proposed/confirmed dates; participants can edit location (polling or confirmed) and add a note once confirmed.
+- **Email is the source of truth** — re-subscribing with the same address reuses the existing participant and token (votes and proposals are preserved). Emails are normalized (lowercase, trimmed). Returning users can also **quick-login** with e-mail only via `POST /connexion` (no mail sent).
+- Location and optional notes are shown on the public page for proposed/confirmed dates; only the **creator** of a date or an **admin** (`HORIZON_EMAIL`) can edit location; only the creator or admin can add a note once confirmed.
+- Logged-in participants can **update their display name** via `PATCH /profil`.
 - **Beginners welcome** defaults to `true` on new proposals (`beginners_welcome`).
 - Auto-confirm a proposed date when it reaches `POKER_MIN_PARTICIPANTS` (default 3) **yes** votes (`confirmed_at` on the date). The poll stays open: other future dates remain visible and votable, and new dates can still be proposed.
 - When several dates are confirmed in one batch, participants receive **one digest e-mail** (not one per date).
@@ -17,6 +18,7 @@ description: "Organisation de soirées poker sans compte utilisateur. Activates 
 - Confirmed dates expose **calendar links** (`.ics` download + Google Calendar URL).
 - The day before an **unconfirmed** poll date (`starts_at` tomorrow, below `POKER_MIN_PARTICIPANTS` yes votes), a **vote reminder** e-mail is sent once to participants who have not voted on that date (`vote_reminder_sent_at` on the date).
 - Any logged-in participant can **manually remind non-voters** for a poll date via `POST /dates/{proposedDate}/relance` (button on poll cards).
+- **Admin** (participant e-mail in `HORIZON_EMAIL`) sees a player management panel: resend « c’est calé » (one or all), resend access link, remove player.
 - A round closes when a **confirmed** date has taken place (`starts_at` in the past). Future proposed dates carry over to the next polling round. No email is sent when the poll continues.
 - Voter **names** are shown on poll cards and confirmed cards (yes / maybe / no lists).
 
@@ -27,6 +29,7 @@ description: "Organisation de soirées poker sans compte utilisateur. Activates 
 | Service (business logic) | `app/Services/PokerSchedulingService.php` |
 | Mail dispatch + local safety | `app/Support/PokerMailDispatcher.php` |
 | Mail failure logging | `app/Listeners/LogPokerMailQueueFailure.php` |
+| Admin gate | `app/Support/PokerAdmin.php` (uses `HORIZON_EMAIL`) |
 | Calendar export | `app/Support/ProposedDateCalendar.php` |
 | Public controller | `app/Http/Controllers/PokerController.php` |
 | Page | `resources/js/pages/Poker/Index.vue` |

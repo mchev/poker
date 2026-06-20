@@ -219,6 +219,38 @@ test('re-subscribing with the same email keeps token and votes', function () {
     Mail::assertQueued(ParticipantWelcomeMail::class, fn ($mail) => $mail->hasTo('alex@example.com'));
 });
 
+test('returning participants can quick login with email only', function () {
+    Mail::fake();
+
+    $participant = Participant::factory()->create([
+        'email' => 'alex@exemple.fr',
+        'name' => 'Alex',
+    ]);
+    SchedulingRound::factory()->create(['status' => SchedulingRoundStatus::Polling]);
+
+    $this->post(route('poker.login'), [
+        'email' => 'Alex@exemple.fr',
+    ])
+        ->assertRedirect(route('home', ['token' => $participant->token]))
+        ->assertSessionHas('toast.message', 'Content de te revoir ! Tu peux voter tout de suite.');
+
+    $this->withCookie(config('poker.cookie_name'), $participant->token)
+        ->get(route('home', ['token' => $participant->token]))
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->where('participant.id', $participant->id)
+            ->where('participant.name', 'Alex'));
+
+    Mail::assertNothingQueued();
+});
+
+test('quick login rejects unknown emails', function () {
+    $this->post(route('poker.login'), [
+        'email' => 'inconnu@exemple.fr',
+    ])
+        ->assertSessionHasErrors('email');
+});
+
 test('participants can subscribe and receive a personal link', function () {
     Mail::fake();
     config(['mail.from.address' => 'admin@example.com']);
@@ -1040,4 +1072,163 @@ test('participants can request a new access link by email', function () {
         ->assertSessionHas('toast.message', 'Lien renvoyé ! Jette un œil à ta boîte mail.');
 
     Mail::assertQueued(ParticipantWelcomeMail::class, fn ($mail) => $mail->hasTo($participant->email));
+});
+
+test('admin participants see the admin player list with emails', function () {
+    config(['horizon.allowed_emails' => ['admin@example.com']]);
+
+    $admin = Participant::factory()->create(['email' => 'admin@example.com']);
+    Participant::factory()->create(['email' => 'player@example.com']);
+
+    $data = app(PokerSchedulingService::class)->pageData($admin);
+
+    expect($data['participant']['isAdmin'])->toBeTrue()
+        ->and($data['adminParticipants'])->toHaveCount(2)
+        ->and($data['adminParticipants'][0])->toHaveKeys(['id', 'name', 'email']);
+});
+
+test('non-admin participants do not see admin data', function () {
+    config(['horizon.allowed_emails' => ['admin@example.com']]);
+
+    $player = Participant::factory()->create(['email' => 'player@example.com']);
+
+    $data = app(PokerSchedulingService::class)->pageData($player);
+
+    expect($data['participant']['isAdmin'])->toBeFalse()
+        ->and($data['adminParticipants'])->toBe([]);
+});
+
+test('admin can resend confirmation emails to all participants', function () {
+    Mail::fake();
+    config(['horizon.allowed_emails' => ['admin@example.com'], 'poker.min_participants' => 2]);
+
+    $admin = Participant::factory()->create(['email' => 'admin@example.com']);
+    $round = SchedulingRound::factory()->create(['status' => SchedulingRoundStatus::Polling]);
+    $confirmedDate = ProposedDate::factory()->for($round)->create([
+        'starts_at' => CarbonImmutable::now()->addDays(3),
+        'confirmed_at' => now(),
+        'proposed_by_participant_id' => null,
+    ]);
+
+    Participant::factory()->count(2)->create();
+
+    $this->withCookie(config('poker.cookie_name'), $admin->token)
+        ->post(route('poker.admin.confirmation.resend-all', ['token' => $admin->token]))
+        ->assertRedirect()
+        ->assertSessionHas('toast.message', 'Mail « c’est calé » renvoyé à 3 personnes.');
+
+    Mail::assertQueued(TournamentsConfirmedMail::class, 3);
+    Mail::assertQueued(
+        TournamentsConfirmedMail::class,
+        fn (TournamentsConfirmedMail $mail) => $mail->proposedDates->contains('id', $confirmedDate->id),
+    );
+});
+
+test('admin can delete another participant', function () {
+    config(['horizon.allowed_emails' => ['admin@example.com']]);
+
+    $admin = Participant::factory()->create(['email' => 'admin@example.com']);
+    $target = Participant::factory()->create(['name' => 'Alex']);
+
+    $this->withCookie(config('poker.cookie_name'), $admin->token)
+        ->delete(route('poker.admin.participants.destroy', [
+            'token' => $admin->token,
+            'participant' => $target,
+        ]))
+        ->assertRedirect()
+        ->assertSessionHas('toast.message', 'Alex a été retiré·e de la liste.');
+
+    expect(Participant::query()->whereKey($target->id)->exists())->toBeFalse();
+});
+
+test('non-creator cannot update a proposed date location', function () {
+    $creator = Participant::factory()->create(['name' => 'Alex']);
+    $other = Participant::factory()->create(['name' => 'Marie']);
+    $round = SchedulingRound::factory()->create(['status' => SchedulingRoundStatus::Polling]);
+    $proposedDate = ProposedDate::factory()
+        ->for($round)
+        ->create([
+            'location' => 'La fabrique',
+            'proposed_by_participant_id' => $creator->id,
+        ]);
+
+    $this->withCookie(config('poker.cookie_name'), $other->token)
+        ->patch(route('poker.dates.update', [
+            'proposedDate' => $proposedDate,
+            'token' => $other->token,
+        ]), [
+            'location_type' => 'mine',
+        ])
+        ->assertForbidden();
+
+    expect($proposedDate->fresh()->location)->toBe('La fabrique');
+});
+
+test('admin can update another participant proposed date', function () {
+    config(['horizon.allowed_emails' => ['admin@example.com']]);
+
+    $admin = Participant::factory()->create(['email' => 'admin@example.com', 'name' => 'Admin']);
+    $creator = Participant::factory()->create(['name' => 'Alex']);
+    $round = SchedulingRound::factory()->create(['status' => SchedulingRoundStatus::Polling]);
+    $proposedDate = ProposedDate::factory()
+        ->for($round)
+        ->create([
+            'location' => 'La fabrique',
+            'proposed_by_participant_id' => $creator->id,
+        ]);
+
+    $this->withCookie(config('poker.cookie_name'), $admin->token)
+        ->patch(route('poker.dates.update', [
+            'proposedDate' => $proposedDate,
+            'token' => $admin->token,
+        ]), [
+            'location_type' => 'mine',
+        ])
+        ->assertRedirect();
+
+    expect($proposedDate->fresh()->location)->toBe('Chez Admin');
+});
+
+test('participants can update their display name', function () {
+    Http::fake();
+    config(['brevo.api_key' => 'test-key', 'brevo.list_id' => 65]);
+
+    $participant = Participant::factory()->create(['name' => 'Alex']);
+
+    $this->withCookie(config('poker.cookie_name'), $participant->token)
+        ->patch(route('poker.profile.update', ['token' => $participant->token]), [
+            'name' => 'Alexandre',
+        ])
+        ->assertRedirect()
+        ->assertSessionHas('toast.message', 'Pseudo mis à jour.');
+
+    expect($participant->fresh()->name)->toBe('Alexandre');
+
+    $data = app(PokerSchedulingService::class)->pageData($participant->fresh());
+
+    expect($data['participant']['name'])->toBe('Alexandre');
+});
+
+test('guests cannot update their profile', function () {
+    $this->patch(route('poker.profile.update'), [
+        'name' => 'Hacker',
+    ])->assertForbidden();
+});
+
+test('non-admin cannot access admin routes', function () {
+    config(['horizon.allowed_emails' => ['admin@example.com']]);
+
+    $player = Participant::factory()->create(['email' => 'player@example.com']);
+    $target = Participant::factory()->create();
+
+    $this->withCookie(config('poker.cookie_name'), $player->token)
+        ->post(route('poker.admin.confirmation.resend-all', ['token' => $player->token]))
+        ->assertForbidden();
+
+    $this->withCookie(config('poker.cookie_name'), $player->token)
+        ->delete(route('poker.admin.participants.destroy', [
+            'token' => $player->token,
+            'participant' => $target,
+        ]))
+        ->assertForbidden();
 });

@@ -13,6 +13,7 @@ use App\Models\Participant;
 use App\Models\ProposedDate;
 use App\Models\SchedulingRound;
 use App\Models\Vote;
+use App\Support\PokerAdmin;
 use App\Support\PokerMailDispatcher;
 use App\Support\ProposedDateCalendar;
 use Illuminate\Support\Carbon;
@@ -70,6 +71,14 @@ class PokerSchedulingService
     public function sendAccessLink(Participant $participant): void
     {
         PokerMailDispatcher::queueToParticipant($participant, new ParticipantWelcomeMail($participant));
+    }
+
+    public function findParticipantByEmail(string $email): ?Participant
+    {
+        return Participant::query()->firstWhere(
+            'email',
+            Participant::normalizeEmail($email),
+        );
     }
 
     public function findParticipantByToken(?string $token): ?Participant
@@ -138,7 +147,12 @@ class PokerSchedulingService
     {
         $round = $this->activeRound();
 
-        return $proposedDate->scheduling_round_id === $round->id && $round->isPolling();
+        if ($proposedDate->scheduling_round_id !== $round->id || ! $round->isPolling()) {
+            return false;
+        }
+
+        return PokerAdmin::isAdmin($participant)
+            || $proposedDate->proposed_by_participant_id === $participant->id;
     }
 
     public function canParticipantEditNote(Participant $participant, ProposedDate $proposedDate): bool
@@ -147,7 +161,18 @@ class PokerSchedulingService
 
         return $round->isPolling()
             && $proposedDate->scheduling_round_id === $round->id
-            && $proposedDate->isConfirmed();
+            && $proposedDate->isConfirmed()
+            && (PokerAdmin::isAdmin($participant)
+                || $proposedDate->proposed_by_participant_id === $participant->id);
+    }
+
+    public function updateParticipantName(Participant $participant, string $name): Participant
+    {
+        $participant->update(['name' => trim($name)]);
+
+        $this->brevoContacts->syncParticipant($participant->fresh());
+
+        return $participant;
     }
 
     /**
@@ -281,6 +306,61 @@ class PokerSchedulingService
         ]);
 
         return $sent;
+    }
+
+    public function resendConfirmationMail(Participant $target): void
+    {
+        $confirmedDates = $this->upcomingConfirmedDates();
+
+        abort_if($confirmedDates->isEmpty(), 422, 'Aucune soirée calée à annoncer.');
+
+        PokerMailDispatcher::queueToParticipant(
+            $target,
+            new TournamentsConfirmedMail($target, $confirmedDates),
+        );
+    }
+
+    public function resendConfirmationMailsToAll(): int
+    {
+        $confirmedDates = $this->upcomingConfirmedDates();
+
+        abort_if($confirmedDates->isEmpty(), 422, 'Aucune soirée calée à annoncer.');
+
+        $sent = 0;
+
+        Participant::query()->each(function (Participant $participant) use ($confirmedDates, &$sent): void {
+            PokerMailDispatcher::queueToParticipant(
+                $participant,
+                new TournamentsConfirmedMail($participant, $confirmedDates),
+            );
+
+            $sent++;
+        });
+
+        Log::info('Poker admin resent confirmation emails to all participants.', [
+            'participant_count' => $sent,
+            'date_ids' => $confirmedDates->pluck('id')->all(),
+        ]);
+
+        return $sent;
+    }
+
+    public function deleteParticipant(Participant $target): void
+    {
+        $target->delete();
+    }
+
+    /**
+     * @return Collection<int, ProposedDate>
+     */
+    private function upcomingConfirmedDates(): Collection
+    {
+        return $this->activeRound()
+            ->proposedDates()
+            ->whereNotNull('confirmed_at')
+            ->where('starts_at', '>=', now())
+            ->orderBy('starts_at')
+            ->get();
     }
 
     public function completePastTournaments(): int
@@ -544,7 +624,19 @@ class PokerSchedulingService
             'participant' => $participant ? [
                 'id' => $participant->id,
                 'name' => $participant->name,
+                'isAdmin' => PokerAdmin::isAdmin($participant),
             ] : null,
+            'adminParticipants' => $participant && PokerAdmin::isAdmin($participant)
+                ? Participant::query()
+                    ->orderBy('name')
+                    ->get(['id', 'name', 'email'])
+                    ->map(fn (Participant $listed): array => [
+                        'id' => $listed->id,
+                        'name' => $listed->name,
+                        'email' => $listed->email,
+                    ])
+                    ->all()
+                : [],
             'participants' => Participant::query()
                 ->orderBy('name')
                 ->get(['id', 'name'])

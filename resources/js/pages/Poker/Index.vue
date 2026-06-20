@@ -1,11 +1,11 @@
 <script setup lang="ts">
-import { Form, Head, router, usePoll } from '@inertiajs/vue3';
+import { Form, Head, router } from '@inertiajs/vue3';
 import {
     Copy,
-    Link2,
+    LogIn,
     LogOut,
     Mail,
-    MoreVertical,
+    Pencil,
     Plus,
     RefreshCw,
     Sparkles,
@@ -14,6 +14,7 @@ import { computed, ref } from 'vue';
 import { toast } from 'vue-sonner';
 import PokerController from '@/actions/App/Http/Controllers/PokerController';
 import InputError from '@/components/InputError.vue';
+import PokerAdminPanel from '@/components/poker/PokerAdminPanel.vue';
 import PokerConfirmedCard from '@/components/poker/PokerConfirmedCard.vue';
 import PokerLocationFields from '@/components/poker/PokerLocationFields.vue';
 import PokerPollDateCard from '@/components/poker/PokerPollDateCard.vue';
@@ -25,12 +26,6 @@ import {
     CardHeader,
     CardTitle,
 } from '@/components/ui/card';
-import {
-    DropdownMenu,
-    DropdownMenuContent,
-    DropdownMenuItem,
-    DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
@@ -61,6 +56,8 @@ type RoundDate = {
     isConfirmed: boolean;
     canDelete: boolean;
     canEditLocation: boolean;
+    canRemindNonVoters: boolean;
+    nonVoterCount: number;
 };
 
 type ConfirmedDate = {
@@ -91,23 +88,12 @@ type Round = {
 
 const props = defineProps<{
     round: Round;
-    participant: { id: number; name: string } | null;
+    participant: { id: number; name: string; isAdmin: boolean } | null;
     participants: { id: number; name: string }[];
+    adminParticipants: { id: number; name: string; email: string }[];
     subscribedCount: number;
     personalUrl: string | null;
 }>();
-
-const pollJustUpdated = ref(false);
-
-usePoll(15000, {
-    only: ['round', 'subscribedCount'],
-    onSuccess: () => {
-        pollJustUpdated.value = true;
-        window.setTimeout(() => {
-            pollJustUpdated.value = false;
-        }, 3000);
-    },
-});
 
 const selectedVotes = ref<Record<number, string>>(
     Object.fromEntries(
@@ -123,6 +109,7 @@ const proposedLocationType = ref('mine');
 const isProposeFormOpen = ref(false);
 const editingLocationForDateId = ref<number | null>(null);
 const editLocationTypes = ref<Record<number, string>>({});
+const isEditingProfile = ref(false);
 
 const isPolling = computed(() => props.round.status === 'polling');
 const hasConfirmedDates = computed(
@@ -206,7 +193,7 @@ function setVote(dateId: number, vote: string): void {
         { votes: { [dateId]: vote } },
         {
             preserveScroll: true,
-            only: ['round', 'subscribedCount'],
+            only: ['round', 'subscribedCount', 'adminParticipants'],
             onStart: () => {
                 voteSubmittingForDateId.value = dateId;
             },
@@ -231,7 +218,7 @@ function deleteProposedDate(dateId: number): void {
 
     router.delete(PokerController.destroyProposedDate.url(dateId), {
         preserveScroll: true,
-        only: ['round', 'subscribedCount'],
+        only: ['round', 'subscribedCount', 'adminParticipants'],
         onStart: () => {
             dateDeletingId.value = dateId;
         },
@@ -360,17 +347,53 @@ async function copyPersonalLink(): Promise<void> {
                 <div
                     :class="[
                         pokerPanel,
-                        'border-dashed text-sm text-white/75',
+                        'space-y-4 border-dashed text-sm text-white/75',
                     ]"
                 >
-                    <p class="flex items-center gap-2 font-medium text-amber-200">
-                        <Link2 class="size-4 shrink-0" />
-                        Pas de lien ?
-                    </p>
-                    <p class="mt-2">
-                        Réinscris-toi avec la <strong>même adresse e-mail</strong>
-                        pour retrouver tes votes et ton accès.
-                    </p>
+                    <div>
+                        <p class="flex items-center gap-2 font-medium text-amber-200">
+                            <LogIn class="size-4 shrink-0" />
+                            Déjà inscrit·e ?
+                        </p>
+                        <p class="mt-1 text-white/65">
+                            Connecte-toi avec ton e-mail, sans attendre le lien
+                            mail.
+                        </p>
+                    </div>
+                    <Form
+                        v-bind="PokerController.quickLogin.form()"
+                        class="space-y-3"
+                        v-slot="{ errors, processing }"
+                    >
+                        <div class="grid gap-2">
+                            <Label for="login-email" class="text-[#dcebe2]"
+                                >Ton e-mail</Label
+                            >
+                            <Input
+                                id="login-email"
+                                type="email"
+                                name="email"
+                                required
+                                autocomplete="email"
+                                placeholder="alex@exemple.fr"
+                                :class="pokerInput"
+                            />
+                            <InputError :message="errors.email" />
+                        </div>
+                        <Button
+                            type="submit"
+                            variant="outline"
+                            class="h-11 w-full border-white/15 bg-black/35 text-white/85 hover:bg-white/5 hover:text-white"
+                            :disabled="processing"
+                        >
+                            <LogIn class="mr-2 size-4" />
+                            {{
+                                processing
+                                    ? 'Connexion…'
+                                    : 'Me connecter'
+                            }}
+                        </Button>
+                    </Form>
                 </div>
             </CardContent>
         </Card>
@@ -379,80 +402,77 @@ async function copyPersonalLink(): Promise<void> {
             <section
                 class="flex flex-col gap-4 rounded-2xl border border-white/10 bg-black/45 px-4 py-4 backdrop-blur-md sm:flex-row sm:items-center sm:justify-between"
             >
-                <div class="min-w-0">
-                    <p class="text-sm text-white/85">
-                        Salut
-                        <strong class="text-amber-200">{{
-                            participant.name
-                        }}</strong
-                        > !
-                    </p>
-                    <p
-                        v-if="pollJustUpdated"
-                        class="mt-1 flex items-center gap-1.5 text-xs text-emerald-300/90"
-                        aria-live="polite"
+                <div class="min-w-0 flex-1">
+                    <div
+                        v-if="!isEditingProfile"
+                        class="flex flex-wrap items-center gap-2"
                     >
-                        <span
-                            class="size-2 shrink-0 rounded-full bg-emerald-400"
-                            aria-hidden="true"
-                        />
-                        Sondage mis à jour
-                    </p>
-                </div>
-
-                <div class="flex gap-2 sm:hidden">
-                    <DropdownMenu>
-                        <DropdownMenuTrigger as-child>
+                        <p class="text-sm text-white/85">
+                            Salut
+                            <strong class="text-amber-200">{{
+                                participant.name
+                            }}</strong
+                            > !
+                        </p>
+                        <Button
+                            type="button"
+                            variant="ghost"
+                            class="h-8 px-2 text-xs text-white/55 hover:bg-white/5 hover:text-white"
+                            @click="isEditingProfile = true"
+                        >
+                            <Pencil class="mr-1 size-3.5" />
+                            Modifier mon pseudo
+                        </Button>
+                    </div>
+                    <Form
+                        v-else
+                        v-bind="PokerController.updateProfile.form()"
+                        class="flex flex-col gap-2 sm:flex-row sm:items-end"
+                        v-slot="{ errors, processing }"
+                        @success="
+                            () => {
+                                isEditingProfile = false;
+                                toast.success('Pseudo mis à jour');
+                            }
+                        "
+                    >
+                        <div class="grid min-w-0 flex-1 gap-1">
+                            <Label for="profile-name" class="text-xs text-white/65"
+                                >Ton pseudo</Label
+                            >
+                            <Input
+                                id="profile-name"
+                                name="name"
+                                required
+                                :default-value="participant.name"
+                                autocomplete="nickname"
+                                :class="pokerInput"
+                            />
+                            <InputError :message="errors.name" />
+                        </div>
+                        <div class="flex gap-2">
                             <Button
                                 type="button"
-                                variant="outline"
-                                class="h-11 flex-1 border-white/10 bg-black/35 text-white/80"
-                                aria-label="Actions du compte"
+                                variant="ghost"
+                                class="h-11 text-white/60 hover:text-white"
+                                :disabled="processing"
+                                @click="isEditingProfile = false"
                             >
-                                <MoreVertical class="size-4" />
+                                Annuler
                             </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end" class="w-56">
-                            <DropdownMenuItem
-                                v-if="personalUrl"
-                                @click="copyPersonalLink"
+                            <Button
+                                type="submit"
+                                class="h-11 font-semibold"
+                                :class="casinoChipPrimary"
+                                :disabled="processing"
                             >
-                                <Copy class="mr-2 size-4" />
-                                Copier mon lien
-                            </DropdownMenuItem>
-                            <DropdownMenuItem as-child>
-                                <Form
-                                    v-bind="PokerController.resendAccessLink.form()"
-                                    class="w-full"
-                                >
-                                    <button
-                                        type="submit"
-                                        class="flex w-full items-center px-2 py-1.5 text-sm"
-                                    >
-                                        <RefreshCw class="mr-2 size-4" />
-                                        Renvoyer mon lien
-                                    </button>
-                                </Form>
-                            </DropdownMenuItem>
-                            <DropdownMenuItem as-child>
-                                <Form
-                                    v-bind="PokerController.logout.form()"
-                                    class="w-full"
-                                >
-                                    <button
-                                        type="submit"
-                                        class="flex w-full items-center px-2 py-1.5 text-sm"
-                                    >
-                                        <LogOut class="mr-2 size-4" />
-                                        Me déconnecter
-                                    </button>
-                                </Form>
-                            </DropdownMenuItem>
-                        </DropdownMenuContent>
-                    </DropdownMenu>
+                                {{ processing ? 'Enregistrement…' : 'Enregistrer' }}
+                            </Button>
+                        </div>
+                    </Form>
                 </div>
 
-                <div class="hidden flex-wrap gap-2 sm:flex">
+                <div class="flex flex-wrap gap-2">
                     <Button
                         v-if="personalUrl"
                         type="button"
@@ -498,6 +518,13 @@ async function copyPersonalLink(): Promise<void> {
                     </Form>
                 </div>
             </section>
+
+            <PokerAdminPanel
+                v-if="participant.isAdmin"
+                :admin-participants="adminParticipants"
+                :has-confirmed-dates="hasConfirmedDates"
+                :current-participant-id="participant.id"
+            />
 
             <nav
                 v-if="hasConfirmedDates || showPollNav || showProposeNav"

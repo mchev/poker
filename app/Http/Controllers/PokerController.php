@@ -2,16 +2,19 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Requests\QuickLoginParticipantRequest;
 use App\Http\Requests\ResendAccessLinkRequest;
 use App\Http\Requests\StoreAttendanceRequest;
 use App\Http\Requests\StorePastNightWinnerRequest;
 use App\Http\Requests\StoreProposedDateRequest;
 use App\Http\Requests\StoreVotesRequest;
 use App\Http\Requests\SubscribeParticipantRequest;
+use App\Http\Requests\UpdateParticipantProfileRequest;
 use App\Http\Requests\UpdateProposedDateRequest;
 use App\Models\Participant;
 use App\Models\ProposedDate;
 use App\Services\PokerSchedulingService;
+use App\Support\PokerAdmin;
 use App\Support\ProposedDateCalendar;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -52,6 +55,20 @@ class PokerController extends Controller
             ->with('toast', [
                 'type' => 'success',
                 'message' => 'C’est bon ! Check tes mails, ton lien t’attend. Tu peux voter tout de suite.',
+            ]);
+    }
+
+    public function quickLogin(QuickLoginParticipantRequest $request): RedirectResponse
+    {
+        $participant = $this->scheduling->findParticipantByEmail($request->validated('email'));
+
+        abort_unless($participant instanceof Participant, 404);
+
+        return redirect()
+            ->route('home', ['token' => $participant->token])
+            ->with('toast', [
+                'type' => 'success',
+                'message' => 'Content de te revoir ! Tu peux voter tout de suite.',
             ]);
     }
 
@@ -113,6 +130,22 @@ class PokerController extends Controller
         return back()->with('toast', [
             'type' => 'success',
             'message' => 'C’est enregistré.',
+        ]);
+    }
+
+    public function updateProfile(UpdateParticipantProfileRequest $request): RedirectResponse
+    {
+        /** @var Participant $participant */
+        $participant = $request->participant();
+
+        $this->scheduling->updateParticipantName(
+            $participant,
+            $request->validated('name'),
+        );
+
+        return back()->with('toast', [
+            'type' => 'success',
+            'message' => 'Pseudo mis à jour.',
         ]);
     }
 
@@ -184,6 +217,76 @@ class PokerController extends Controller
         ]);
     }
 
+    public function adminResendConfirmationToAll(Request $request): RedirectResponse
+    {
+        $this->ensurePokerAdmin($request);
+
+        $sent = $this->scheduling->resendConfirmationMailsToAll();
+
+        return back()->with('toast', [
+            'type' => 'success',
+            'message' => "Mail « c’est calé » renvoyé à {$sent} personne".($sent > 1 ? 's' : '').'.',
+        ]);
+    }
+
+    public function adminResendConfirmationToParticipant(
+        Request $request,
+        Participant $participant,
+    ): RedirectResponse {
+        $this->ensurePokerAdmin($request);
+
+        $this->scheduling->resendConfirmationMail($participant);
+
+        return back()->with('toast', [
+            'type' => 'success',
+            'message' => "Mail « c’est calé » renvoyé à {$participant->name}.",
+        ]);
+    }
+
+    public function adminResendAccessLinkToParticipant(
+        Request $request,
+        Participant $participant,
+    ): RedirectResponse {
+        $this->ensurePokerAdmin($request);
+
+        $this->scheduling->sendAccessLink($participant);
+
+        return back()->with('toast', [
+            'type' => 'success',
+            'message' => "Lien d’accès renvoyé à {$participant->name}.",
+        ]);
+    }
+
+    public function adminDestroyParticipant(
+        Request $request,
+        Participant $participant,
+    ): RedirectResponse {
+        /** @var Participant $actor */
+        $actor = $request->attributes->get('poker_participant');
+
+        $this->ensurePokerAdmin($request);
+
+        $deletedSelf = $actor->is($participant);
+        $name = $participant->name;
+
+        $this->scheduling->deleteParticipant($participant);
+
+        if ($deletedSelf) {
+            return redirect()
+                ->route('home')
+                ->withoutCookie(config('poker.cookie_name'))
+                ->with('toast', [
+                    'type' => 'success',
+                    'message' => 'Ton compte a été supprimé.',
+                ]);
+        }
+
+        return back()->with('toast', [
+            'type' => 'success',
+            'message' => "{$name} a été retiré·e de la liste.",
+        ]);
+    }
+
     public function updatePastNightWinner(
         StorePastNightWinnerRequest $request,
         ProposedDate $proposedDate,
@@ -222,5 +325,15 @@ class PokerController extends Controller
                 'type' => 'success',
                 'message' => 'À bientôt ! Tu peux revenir via ton lien mail quand tu veux.',
             ]);
+    }
+
+    private function ensurePokerAdmin(Request $request): Participant
+    {
+        /** @var Participant|null $participant */
+        $participant = $request->attributes->get('poker_participant');
+
+        abort_unless($participant instanceof Participant && PokerAdmin::isAdmin($participant), 403);
+
+        return $participant;
     }
 }

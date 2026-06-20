@@ -19,6 +19,12 @@ Route::middleware(ResolvePokerParticipant::class)->group(function (): void {
     Route::post('/inscription', [PokerController::class, 'subscribe'])
         ->middleware('throttle:6,1')
         ->name('poker.subscribe');
+    Route::post('/connexion', [PokerController::class, 'quickLogin'])
+        ->middleware('throttle:10,1')
+        ->name('poker.login');
+    Route::patch('/profil', [PokerController::class, 'updateProfile'])
+        ->middleware('throttle:20,1')
+        ->name('poker.profile.update');
     Route::post('/votes', [PokerController::class, 'storeVotes'])
         ->middleware('throttle:30,1')
         ->name('poker.votes.store');
@@ -42,4 +48,16 @@ Route::middleware(ResolvePokerParticipant::class)->group(function (): void {
         ->name('poker.access.resend');
     Route::post('/deconnexion', [PokerController::class, 'logout'])
         ->name('poker.logout');
+    Route::post('/admin/renvoyer-confirmations', [PokerController::class, 'adminResendConfirmationToAll'])
+        ->middleware('throttle:6,1')
+        ->name('poker.admin.confirmation.resend-all');
+    Route::post('/admin/participants/{participant}/renvoyer-confirmation', [PokerController::class, 'adminResendConfirmationToParticipant'])
+        ->middleware('throttle:20,1')
+        ->name('poker.admin.participants.confirmation.resend');
+    Route::post('/admin/participants/{participant}/renvoyer-lien', [PokerController::class, 'adminResendAccessLinkToParticipant'])
+        ->middleware('throttle:20,1')
+        ->name('poker.admin.participants.access.resend');
+    Route::delete('/admin/participants/{participant}', [PokerController::class, 'adminDestroyParticipant'])
+        ->middleware('throttle:20,1')
+        ->name('poker.admin.participants.destroy');
 });
