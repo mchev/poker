@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Middleware\PromptHorizonBasicAuth;
 use Illuminate\Support\Str;
 
 return [
@@ -45,6 +46,25 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Horizon Dashboard Access (production)
+    |--------------------------------------------------------------------------
+    |
+    | HTTP Basic Auth for the Horizon dashboard when Fortify login is disabled.
+    | Use your e-mail as the username in the browser prompt.
+    |
+    */
+
+    'allowed_email' => env('HORIZON_EMAIL'),
+
+    'password' => env('HORIZON_PASSWORD'),
+
+    'allowed_emails' => array_values(array_filter(array_map(
+        trim(...),
+        explode(',', (string) env('HORIZON_EMAIL', '')),
+    ))),
+
+    /*
+    |--------------------------------------------------------------------------
     | Horizon Redis Connection
     |--------------------------------------------------------------------------
     |
@@ -83,7 +103,7 @@ return [
     |
     */
 
-    'middleware' => ['web'],
+    'middleware' => ['web', PromptHorizonBasicAuth::class],
 
     /*
     |--------------------------------------------------------------------------

@@ -40,7 +40,27 @@ Transactional e-mails use Laravel's **Brevo API transport** (`symfony/brevo-mail
 
 ### Production queue worker (critical)
 
-In **production**, mails are **queued** (`PokerMailDispatcher` only sends synchronously in `local`). A worker must process the queue (`php artisan queue:work`, Horizon, or Laravel Cloud queue) — otherwise confirmation and reminder e-mails never leave the queue.
+In **production**, mails are **queued** (`PokerMailDispatcher` only sends synchronously in `local`). A worker must process the queue or mails never leave it.
+
+**Horizon only works with the Redis queue driver** — it does not process `database` jobs. Your logs (`queue_connection: database`) mean jobs sit in the `jobs` table until something runs `php artisan queue:work`.
+
+Choose one setup in production:
+
+1. **Redis + Horizon** (recommended with Horizon): `QUEUE_CONNECTION=redis`, Redis available, run `php artisan horizon` as a long-lived worker. Horizon dashboard then shows pending/failed jobs.
+2. **Database queue worker**: keep `QUEUE_CONNECTION=database` and run `php artisan queue:work database` as a long-lived worker (Laravel Cloud “Queue”, Supervisor, etc.). Horizon will **not** show these jobs.
+
+To drain a backlog once: `php artisan queue:work database --stop-when-empty`.
+
+### Horizon dashboard access
+
+Fortify login is disabled on the public poker site. Horizon uses **HTTP Basic Auth** in non-local environments:
+
+```
+HORIZON_EMAIL=martin.chevignard@gmail.com
+HORIZON_PASSWORD=your-secret-password
+```
+
+Visit `/horizon` — use the e-mail as username and `HORIZON_PASSWORD` as password in the browser prompt.
 
 ### Observability
 
