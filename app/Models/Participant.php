@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Str;
 
@@ -51,5 +52,13 @@ class Participant extends Model
     public function proposedDates(): HasMany
     {
         return $this->hasMany(ProposedDate::class, 'proposed_by_participant_id');
+    }
+
+    /**
+     * @return BelongsToMany<Game, $this>
+     */
+    public function gamePreferences(): BelongsToMany
+    {
+        return $this->belongsToMany(Game::class, 'game_participant');
     }
 }

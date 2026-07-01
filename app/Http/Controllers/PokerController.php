@@ -43,6 +43,16 @@ class PokerController extends Controller
         return Inertia::render('Poker/History', $this->scheduling->historyData($participant));
     }
 
+    public function admin(Request $request): Response
+    {
+        /** @var Participant|null $participant */
+        $participant = $request->attributes->get('poker_participant');
+
+        abort_unless($participant instanceof Participant && PokerAdmin::isAdmin($participant), 403);
+
+        return Inertia::render('Poker/Admin', $this->scheduling->adminData($participant));
+    }
+
     public function subscribe(SubscribeParticipantRequest $request): RedirectResponse
     {
         $participant = $this->scheduling->subscribe(
@@ -102,6 +112,7 @@ class PokerController extends Controller
             $request->locationLabel(),
             $request->validated('theme'),
             $request->boolean('beginners_welcome'),
+            $request->validated('game_ids'),
         );
 
         return back()->with('toast', [
@@ -123,6 +134,16 @@ class PokerController extends Controller
 
         if ($request->has('note')) {
             $updates['note'] = $request->validated('note');
+        }
+
+        if ($request->has('game_ids')) {
+            $updates['game_ids'] = $request->validated('game_ids');
+        }
+
+        if ($request->has('date')) {
+            $updates['starts_at'] = Carbon::parse(
+                $request->validated('date').' '.$request->validated('time'),
+            );
         }
 
         $this->scheduling->updateProposedDate($participant, $proposedDate, $updates);
@@ -314,6 +335,24 @@ class PokerController extends Controller
                 'Content-Disposition' => 'attachment; filename="poker-party.ics"',
             ],
         );
+    }
+
+    public function updateGamePreferences(Request $request): RedirectResponse
+    {
+        /** @var Participant $participant */
+        $participant = $request->attributes->get('poker_participant');
+
+        abort_unless($participant instanceof Participant, 403);
+
+        $gameIds = $request->input('game_ids');
+        $gameIds = is_array($gameIds) ? array_map('intval', $gameIds) : [];
+
+        $this->scheduling->updateGamePreferences($participant, $gameIds);
+
+        return back()->with('toast', [
+            'type' => 'success',
+            'message' => 'Préférences de jeux enregistrées.',
+        ]);
     }
 
     public function logout(Request $request): RedirectResponse

@@ -8,14 +8,16 @@ import {
     Pencil,
     Plus,
     RefreshCw,
+    Shield,
     Sparkles,
 } from 'lucide-vue-next';
 import { computed, ref } from 'vue';
 import { toast } from 'vue-sonner';
 import PokerController from '@/actions/App/Http/Controllers/PokerController';
 import InputError from '@/components/InputError.vue';
-import PokerAdminPanel from '@/components/poker/PokerAdminPanel.vue';
+
 import PokerConfirmedCard from '@/components/poker/PokerConfirmedCard.vue';
+import PokerGameBadges from '@/components/poker/PokerGameBadges.vue';
 import PokerLocationFields from '@/components/poker/PokerLocationFields.vue';
 import PokerPollDateCard from '@/components/poker/PokerPollDateCard.vue';
 import { Button } from '@/components/ui/button';
@@ -38,6 +40,13 @@ import {
     pokerPanel,
 } from '@/lib/pokerUi';
 
+type Game = {
+    id: number;
+    name: string;
+    slug: string;
+    icon: string | null;
+};
+
 type RoundDate = {
     id: number;
     startsAt: string;
@@ -45,6 +54,7 @@ type RoundDate = {
     location: string | null;
     theme: string | null;
     beginnersWelcome: boolean;
+    games: Game[];
     note: string | null;
     yesCount: number;
     maybeCount: number;
@@ -56,6 +66,7 @@ type RoundDate = {
     isConfirmed: boolean;
     canDelete: boolean;
     canEditLocation: boolean;
+    canEditTime: boolean;
     canRemindNonVoters: boolean;
     nonVoterCount: number;
 };
@@ -67,6 +78,7 @@ type ConfirmedDate = {
     location: string | null;
     theme: string | null;
     beginnersWelcome: boolean;
+    games: Game[];
     note: string | null;
     myVote: 'yes' | 'no' | 'maybe' | null;
     attendingCount: number;
@@ -93,6 +105,8 @@ const props = defineProps<{
     adminParticipants: { id: number; name: string; email: string }[];
     subscribedCount: number;
     personalUrl: string | null;
+    availableGames: Game[];
+    participantGamePreferences: number[];
 }>();
 
 const selectedVotes = ref<Record<number, string>>(
@@ -108,8 +122,12 @@ const dateDeletingId = ref<number | null>(null);
 const proposedLocationType = ref('mine');
 const isProposeFormOpen = ref(false);
 const editingLocationForDateId = ref<number | null>(null);
+const editingTimeForDateId = ref<number | null>(null);
 const editLocationTypes = ref<Record<number, string>>({});
 const isEditingProfile = ref(false);
+const isEditingGames = ref(false);
+const selectedProposeGames = ref<number[]>([]);
+const selectedGamePreferences = ref<number[]>([...props.participantGamePreferences]);
 
 const isPolling = computed(() => props.round.status === 'polling');
 const hasConfirmedDates = computed(
@@ -181,6 +199,16 @@ function toggleLocationEdit(dateId: number): void {
     setEditLocationType(dateId, 'mine');
 }
 
+function toggleTimeEdit(dateId: number): void {
+    if (editingTimeForDateId.value === dateId) {
+        editingTimeForDateId.value = null;
+
+        return;
+    }
+
+    editingTimeForDateId.value = dateId;
+}
+
 function scrollToSection(id: string): void {
     document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
@@ -229,6 +257,21 @@ function deleteProposedDate(dateId: number): void {
             dateDeletingId.value = null;
         },
     });
+}
+
+function saveGamePreferences(): void {
+    router.patch(
+        PokerController.updateGamePreferences.url(),
+        { game_ids: selectedGamePreferences.value },
+        {
+            preserveScroll: true,
+            only: ['participantGamePreferences'],
+            onSuccess: () => {
+                isEditingGames.value = false;
+                toast.success('Préférences de jeux enregistrées');
+            },
+        },
+    );
 }
 
 async function copyPersonalLink(): Promise<void> {
@@ -400,131 +443,228 @@ async function copyPersonalLink(): Promise<void> {
 
         <template v-else>
             <section
-                class="flex flex-col gap-4 rounded-2xl border border-white/10 bg-black/45 px-4 py-4 backdrop-blur-md sm:flex-row sm:items-center sm:justify-between"
+                class="space-y-4 rounded-2xl border border-white/10 bg-black/45 px-4 py-4 backdrop-blur-md"
             >
-                <div class="min-w-0 flex-1">
-                    <div
-                        v-if="!isEditingProfile"
-                        class="flex flex-wrap items-center gap-2"
-                    >
-                        <p class="text-sm text-white/85">
-                            Salut
-                            <strong class="text-amber-200">{{
-                                participant.name
-                            }}</strong
-                            > !
-                        </p>
-                        <Button
-                            type="button"
-                            variant="ghost"
-                            class="h-8 px-2 text-xs text-white/55 hover:bg-white/5 hover:text-white"
-                            @click="isEditingProfile = true"
-                        >
-                            <Pencil class="mr-1 size-3.5" />
-                            Modifier mon pseudo
-                        </Button>
-                    </div>
-                    <Form
-                        v-else
-                        v-bind="PokerController.updateProfile.form()"
-                        class="flex flex-col gap-2 sm:flex-row sm:items-end"
-                        v-slot="{ errors, processing }"
-                        @success="
-                            () => {
-                                isEditingProfile = false;
-                                toast.success('Pseudo mis à jour');
-                            }
-                        "
-                    >
-                        <div class="grid min-w-0 flex-1 gap-1">
-                            <Label for="profile-name" class="text-xs text-white/65"
-                                >Ton pseudo</Label
-                            >
-                            <Input
-                                id="profile-name"
-                                name="name"
-                                required
-                                :default-value="participant.name"
-                                autocomplete="nickname"
-                                :class="pokerInput"
-                            />
-                            <InputError :message="errors.name" />
-                        </div>
-                        <div class="flex gap-2">
+                <div
+                    class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
+                >
+                    <div class="min-w-0 flex-1">
+                        <div v-if="!isEditingProfile" class="flex flex-wrap items-center gap-x-2 gap-y-1">
+                            <p class="text-sm text-white/85">
+                                Salut
+                                <strong class="text-amber-200">{{ participant.name }}</strong> !
+                            </p>
                             <Button
                                 type="button"
                                 variant="ghost"
-                                class="h-11 text-white/60 hover:text-white"
-                                :disabled="processing"
-                                @click="isEditingProfile = false"
+                                class="h-7 px-1.5 text-xs text-white/50 hover:bg-white/5 hover:text-white"
+                                @click="isEditingProfile = true"
                             >
-                                Annuler
-                            </Button>
-                            <Button
-                                type="submit"
-                                class="h-11 font-semibold"
-                                :class="casinoChipPrimary"
-                                :disabled="processing"
-                            >
-                                {{ processing ? 'Enregistrement…' : 'Enregistrer' }}
+                                <Pencil class="size-3" />
                             </Button>
                         </div>
-                    </Form>
+                        <Form
+                            v-else
+                            v-bind="PokerController.updateProfile.form()"
+                            class="flex flex-col gap-2 sm:flex-row sm:items-end"
+                            v-slot="{ errors, processing }"
+                            @success="
+                                () => {
+                                    isEditingProfile = false;
+                                    toast.success('Pseudo mis à jour');
+                                }
+                            "
+                        >
+                            <div class="grid min-w-0 flex-1 gap-1">
+                                <Label for="profile-name" class="text-xs text-white/65"
+                                    >Ton pseudo</Label
+                                >
+                                <Input
+                                    id="profile-name"
+                                    name="name"
+                                    required
+                                    :default-value="participant.name"
+                                    autocomplete="nickname"
+                                    :class="pokerInput"
+                                />
+                                <InputError :message="errors.name" />
+                            </div>
+                            <div class="flex gap-2">
+                                <Button
+                                    type="button"
+                                    variant="ghost"
+                                    class="h-11 text-white/60 hover:text-white"
+                                    :disabled="processing"
+                                    @click="isEditingProfile = false"
+                                >
+                                    Annuler
+                                </Button>
+                                <Button
+                                    type="submit"
+                                    class="h-11 font-semibold"
+                                    :class="casinoChipPrimary"
+                                    :disabled="processing"
+                                >
+                                    {{ processing ? 'Enregistrement…' : 'Enregistrer' }}
+                                </Button>
+                            </div>
+                        </Form>
+
+                        <p class="mt-1 text-sm text-white/65">
+                            <template v-if="selectedGamePreferences.length > 0">
+                                Mes jeux :
+                                <strong>{{
+                                    selectedGamePreferences
+                                        .map((id) => {
+                                            const game = availableGames.find(
+                                                (g) => g.id === id,
+                                            );
+                                            return game
+                                                ? (game.icon ?? '') + ' ' + game.name
+                                                : '';
+                                        })
+                                        .join(', ')
+                                }}</strong>.
+                            </template>
+                            <template v-else>
+                                Intéressé·e par tous les jeux.
+                            </template>
+                            <Button
+                                type="button"
+                                variant="ghost"
+                                class="ml-1 h-7 px-1.5 text-xs text-white/50 hover:bg-white/5 hover:text-white"
+                                @click="
+                                    () => {
+                                        selectedGamePreferences = [
+                                            ...props.participantGamePreferences,
+                                        ];
+                                        isEditingGames = true;
+                                    }
+                                "
+                            >
+                                <Pencil class="size-3" />
+                            </Button>
+                        </p>
+                    </div>
+
+                    <div class="flex flex-wrap items-center gap-2">
+                        <Button
+                            v-if="personalUrl"
+                            type="button"
+                            variant="outline"
+                            class="h-9 border-white/10 bg-black/35 px-3 text-xs text-white/80 hover:bg-white/5 hover:text-white"
+                            @click="copyPersonalLink"
+                        >
+                            <Copy class="mr-1.5 size-3.5" />
+                            Lien
+                        </Button>
+                        <Form
+                            v-bind="PokerController.resendAccessLink.form()"
+                            v-slot="{ processing }"
+                        >
+                            <Button
+                                type="submit"
+                                variant="outline"
+                                class="h-9 border-white/10 bg-black/35 px-3 text-xs text-white/80 hover:bg-white/5 hover:text-white"
+                                :disabled="processing"
+                            >
+                                <RefreshCw
+                                    class="mr-1.5 size-3.5"
+                                    :class="{ 'animate-spin': processing }"
+                                />
+                                Renvoyer
+                            </Button>
+                        </Form>
+                        <a
+                            v-if="participant.isAdmin"
+                            href="/admin"
+                            class="inline-flex h-9 items-center gap-1.5 rounded-lg border border-amber-400/25 bg-amber-500/10 px-3 text-xs font-medium text-amber-200/90 transition-colors hover:bg-amber-500/15 hover:text-amber-100"
+                        >
+                            <Shield class="size-3.5" />
+                            Admin
+                        </a>
+                        <Form
+                            v-bind="PokerController.logout.form()"
+                            v-slot="{ processing }"
+                        >
+                            <Button
+                                type="submit"
+                                variant="ghost"
+                                class="h-9 px-2 text-xs text-[#8faa9a] hover:bg-white/5 hover:text-[#dcebe2]"
+                                :disabled="processing"
+                            >
+                                <LogOut class="size-3.5" />
+                            </Button>
+                        </Form>
+                    </div>
                 </div>
 
-                <div class="flex flex-wrap gap-2">
-                    <Button
-                        v-if="personalUrl"
-                        type="button"
-                        variant="outline"
-                        class="h-11 border-white/10 bg-black/35 text-white/80 hover:bg-white/5 hover:text-white"
-                        @click="copyPersonalLink"
-                    >
-                        <Copy class="mr-2 size-4" />
-                        Copier mon lien
-                    </Button>
-                    <Form
-                        v-bind="PokerController.resendAccessLink.form()"
-                        v-slot="{ processing }"
-                    >
-                        <Button
-                            type="submit"
-                            variant="outline"
-                            class="h-11 border-white/10 bg-black/35 text-white/80 hover:bg-white/5 hover:text-white"
-                            :disabled="processing"
+                <div v-if="isEditingGames" class="border-t border-white/10 pt-4">
+                    <p class="mb-3 text-xs font-medium text-white/70">
+                        Quels jeux t’intéressent ?
+                    </p>
+                    <div class="flex flex-wrap gap-2">
+                        <label
+                            v-for="game in availableGames"
+                            :key="game.id"
+                            class="flex cursor-pointer items-center gap-2 rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-sm text-white/80 transition-colors hover:bg-white/5"
+                            :class="{
+                                'border-amber-400/35 bg-amber-500/10 text-amber-100':
+                                    selectedGamePreferences.includes(
+                                        game.id,
+                                    ),
+                            }"
                         >
-                            <RefreshCw
-                                class="mr-2 size-4"
-                                :class="{ 'animate-spin': processing }"
+                            <input
+                                type="checkbox"
+                                class="size-4 shrink-0 rounded border-white/20 bg-black/50 text-amber-500 focus:ring-amber-400/40"
+                                :value="game.id"
+                                :checked="
+                                    selectedGamePreferences.includes(
+                                        game.id,
+                                    )
+                                "
+                                @change="
+                                    (e) => {
+                                        const id = game.id;
+                                        if (
+                                            (e.target as HTMLInputElement)
+                                                .checked
+                                        ) {
+                                            selectedGamePreferences.push(id);
+                                        } else {
+                                            selectedGamePreferences =
+                                                selectedGamePreferences.filter(
+                                                    (g) => g !== id,
+                                                );
+                                        }
+                                    }
+                                "
                             />
-                            {{
-                                processing ? 'Patience…' : 'Renvoyer mon lien'
-                            }}
-                        </Button>
-                    </Form>
-                    <Form
-                        v-bind="PokerController.logout.form()"
-                        v-slot="{ processing }"
-                    >
+                            {{ game.icon ?? '' }}
+                            {{ game.name }}
+                        </label>
+                    </div>
+                    <div class="mt-3 flex gap-2">
                         <Button
-                            type="submit"
+                            type="button"
                             variant="ghost"
-                            class="h-11 text-[#8faa9a] hover:bg-white/5 hover:text-[#dcebe2]"
-                            :disabled="processing"
+                            class="h-8 text-xs text-white/60 hover:text-white"
+                            @click="isEditingGames = false"
                         >
-                            <LogOut class="mr-2 size-4" />
-                            Me déconnecter
+                            Annuler
                         </Button>
-                    </Form>
+                        <Button
+                            type="button"
+                            class="h-8 text-xs font-semibold"
+                            :class="casinoChipPrimary"
+                            @click="saveGamePreferences"
+                        >
+                            Enregistrer
+                        </Button>
+                    </div>
                 </div>
             </section>
-
-            <PokerAdminPanel
-                v-if="participant.isAdmin"
-                :admin-participants="adminParticipants"
-                :has-confirmed-dates="hasConfirmedDates"
-                :current-participant-id="participant.id"
-            />
 
             <nav
                 v-if="hasConfirmedDates || showPollNav || showProposeNav"
@@ -632,6 +772,7 @@ async function copyPersonalLink(): Promise<void> {
                             editingLocationForDateId === date.id
                         "
                         :edit-location-type="editLocationTypeFor(date.id)"
+                        :is-editing-time="editingTimeForDateId === date.id"
                         @vote="setVote(date.id, $event)"
                         @delete="deleteProposedDate(date.id)"
                         @toggle-location-edit="toggleLocationEdit(date.id)"
@@ -639,6 +780,8 @@ async function copyPersonalLink(): Promise<void> {
                             setEditLocationType(date.id, $event)
                         "
                         @location-edit-success="editingLocationForDateId = null"
+                        @toggle-time-edit="toggleTimeEdit(date.id)"
+                        @time-edit-success="editingTimeForDateId = null"
                     />
                 </CardContent>
             </Card>
@@ -691,7 +834,12 @@ async function copyPersonalLink(): Promise<void> {
                         reset-on-success
                         class="space-y-5"
                         v-slot="{ errors, processing }"
-                        @success="toast.success('Date ajoutée')"
+                        @success="
+                            () => {
+                                selectedProposeGames = [];
+                                toast.success('Date ajoutée');
+                            }
+                        "
                     >
                         <div class="grid gap-4 sm:grid-cols-2">
                             <div class="grid gap-2">
@@ -780,6 +928,61 @@ async function copyPersonalLink(): Promise<void> {
                                 </span>
                             </span>
                         </label>
+
+                        <div
+                            class="rounded-xl border border-white/10 bg-black/35 px-4 py-3"
+                        >
+                            <p
+                                class="mb-3 text-sm font-medium text-white/85"
+                            >
+                                Quels jeux ?
+                            </p>
+                            <div
+                                class="flex flex-wrap gap-3"
+                            >
+                                <label
+                                    v-for="game in availableGames"
+                                    :key="game.id"
+                                    class="flex cursor-pointer items-center gap-2 rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-sm text-white/80 transition-colors hover:bg-white/5"
+                                    :class="{
+                                        'border-amber-400/35 bg-amber-500/10 text-amber-100':
+                                            selectedProposeGames.includes(game.id),
+                                    }"
+                                >
+                                    <input
+                                        type="checkbox"
+                                        class="size-4 shrink-0 rounded border-white/20 bg-black/50 text-amber-500 focus:ring-amber-400/40"
+                                        :value="game.id"
+                                        :checked="selectedProposeGames.includes(game.id)"
+                                        @change="
+                                            (e) => {
+                                                const id = game.id;
+                                                if (
+                                                    (e.target as HTMLInputElement)
+                                                        .checked
+                                                ) {
+                                                    selectedProposeGames.push(id);
+                                                } else {
+                                                    selectedProposeGames =
+                                                        selectedProposeGames.filter(
+                                                            (g) => g !== id,
+                                                        );
+                                                }
+                                            }
+                                        "
+                                    />
+                                    {{ game.icon ?? '' }}
+                                    {{ game.name }}
+                                </label>
+                            </div>
+                            <input
+                                v-for="id in selectedProposeGames"
+                                :key="id"
+                                type="hidden"
+                                name="game_ids[]"
+                                :value="id"
+                            />
+                        </div>
 
                         <div class="flex justify-end">
                             <Button

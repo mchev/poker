@@ -9,6 +9,7 @@ use App\Mail\NewProposedDateMail;
 use App\Mail\ParticipantWelcomeMail;
 use App\Mail\TournamentsConfirmedMail;
 use App\Mail\VoteReminderMail;
+use App\Models\Game;
 use App\Models\Participant;
 use App\Models\ProposedDate;
 use App\Models\SchedulingRound;
@@ -16,6 +17,7 @@ use App\Models\Vote;
 use App\Support\PokerAdmin;
 use App\Support\PokerMailDispatcher;
 use App\Support\ProposedDateCalendar;
+use Carbon\CarbonInterface;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -96,6 +98,7 @@ class PokerSchedulingService
         string $location,
         ?string $theme = null,
         bool $beginnersWelcome = true,
+        ?array $gameIds = null,
     ): ProposedDate {
         $round = $this->activeRound();
 
@@ -114,9 +117,23 @@ class PokerSchedulingService
             ],
         );
 
+        if (filled($gameIds)) {
+            $proposedDate->games()->sync($gameIds);
+        }
+
         if ($proposedDate->wasRecentlyCreated) {
+            $proposedDate->load('games');
+
             Participant::query()
                 ->whereKeyNot($participant->id)
+                ->where(function ($query) use ($proposedDate): void {
+                    if ($proposedDate->games->isNotEmpty()) {
+                        $query->whereHas('gamePreferences', function ($q) use ($proposedDate): void {
+                            $q->whereIn('game_id', $proposedDate->games->pluck('id'));
+                        }, '>=', 1)
+                            ->orWhereDoesntHave('gamePreferences');
+                    }
+                })
                 ->each(function (Participant $recipient) use ($proposedDate, $participant): void {
                     PokerMailDispatcher::queueToParticipant(
                         $recipient,
@@ -176,7 +193,29 @@ class PokerSchedulingService
     }
 
     /**
-     * @param  array{location?: string, note?: string|null}  $updates
+     * @param  array<int>  $gameIds
+     */
+    public function updateGamePreferences(Participant $participant, array $gameIds): Participant
+    {
+        $participant->gamePreferences()->sync($gameIds);
+
+        return $participant;
+    }
+
+    /**
+     * @return array<int, array{id: int, name: string, slug: string, icon: string|null}>
+     */
+    public function availableGames(): array
+    {
+        return Game::query()
+            ->orderBy('name')
+            ->get()
+            ->map(fn (Game $game): array => $this->gamePayload($game))
+            ->all();
+    }
+
+    /**
+     * @param  array{location?: string, note?: string|null, game_ids?: array<int>|null, starts_at?: Carbon}  $updates
      */
     public function updateProposedDate(Participant $participant, ProposedDate $proposedDate, array $updates): ProposedDate
     {
@@ -192,9 +231,29 @@ class PokerSchedulingService
             $proposedDate->location = $updates['location'];
         }
 
+        if (array_key_exists('game_ids', $updates)) {
+            $proposedDate->games()->sync($updates['game_ids'] ?? []);
+        }
+
+        if (array_key_exists('starts_at', $updates)) {
+            $this->validateUniqueStartsAt($proposedDate, $updates['starts_at']);
+
+            $proposedDate->starts_at = $updates['starts_at'];
+        }
+
         $proposedDate->save();
 
         return $proposedDate;
+    }
+
+    private function validateUniqueStartsAt(ProposedDate $proposedDate, Carbon $startsAt): void
+    {
+        $existing = ProposedDate::where('scheduling_round_id', $proposedDate->scheduling_round_id)
+            ->where('id', '!=', $proposedDate->id)
+            ->where('starts_at', $startsAt)
+            ->exists();
+
+        abort_if($existing, 422, 'Une autre date proposée existe déjà avec ce créneau horaire.');
     }
 
     /**
@@ -497,19 +556,18 @@ class PokerSchedulingService
         $pastNights = ProposedDate::query()
             ->whereNotNull('confirmed_at')
             ->where('starts_at', '<', now())
-            ->with(['votes.participant', 'winner'])
+            ->with(['votes.participant', 'winner', 'games'])
             ->orderByDesc('starts_at')
             ->get()
             ->map(fn (ProposedDate $confirmedDate): array => [
                 'id' => $confirmedDate->id,
                 'startsAt' => $confirmedDate->starts_at->toIso8601String(),
-                'label' => $confirmedDate->starts_at
-                    ->locale('fr')
-                    ->translatedFormat('l j F Y \à H\hi'),
+                'label' => $this->humanDateLabel($confirmedDate->starts_at),
                 'location' => $confirmedDate->location,
                 'theme' => $confirmedDate->theme,
                 'beginnersWelcome' => $confirmedDate->beginners_welcome,
                 'note' => $confirmedDate->note,
+                'games' => $confirmedDate->games->map(fn (Game $g): array => $this->gamePayload($g))->values()->all(),
                 'attendingCount' => $confirmedDate->votes
                     ->where('availability', Availability::Yes)
                     ->count(),
@@ -536,6 +594,37 @@ class PokerSchedulingService
         ];
     }
 
+    /**
+     * @return array<string, mixed>
+     */
+    public function adminData(?Participant $participant): array
+    {
+        $this->completePastTournaments();
+
+        $round = $this->activeRound();
+
+        return [
+            'participant' => $participant ? [
+                'id' => $participant->id,
+                'name' => $participant->name,
+                'isAdmin' => PokerAdmin::isAdmin($participant),
+            ] : null,
+            'adminParticipants' => $participant && PokerAdmin::isAdmin($participant)
+                ? Participant::query()
+                    ->orderBy('name')
+                    ->get(['id', 'name', 'email'])
+                    ->map(fn (Participant $listed): array => [
+                        'id' => $listed->id,
+                        'name' => $listed->name,
+                        'email' => $listed->email,
+                    ])
+                    ->all()
+                : [],
+            'hasConfirmedDates' => $round->proposedDates()->whereNotNull('confirmed_at')->exists(),
+            'subscribedCount' => Participant::query()->count(),
+        ];
+    }
+
     public function setPastNightWinner(ProposedDate $proposedDate, ?int $winnerParticipantId): ProposedDate
     {
         abort_unless($proposedDate->isConfirmed(), 404);
@@ -556,7 +645,7 @@ class PokerSchedulingService
         $round = $this->activeRound()->load([
             'proposedDates' => fn ($query) => $query
                 ->orderBy('starts_at')
-                ->with(['votes.participant']),
+                ->with(['votes.participant', 'games']),
         ]);
 
         $participantVotes = $participant instanceof Participant
@@ -587,14 +676,15 @@ class PokerSchedulingService
                         return [
                             'id' => $date->id,
                             'startsAt' => $date->starts_at->toIso8601String(),
-                            'label' => $date->starts_at
-                                ->locale('fr')
-                                ->translatedFormat('l j F Y \à H\hi'),
+                            'label' => $this->humanDateLabel($date->starts_at),
                             'location' => $date->location,
                             'theme' => $date->theme,
                             'beginnersWelcome' => $date->beginners_welcome,
                             'note' => $date->note,
+                            'games' => $date->games->map(fn (Game $g): array => $this->gamePayload($g))->values()->all(),
                             'canEditLocation' => $participant instanceof Participant
+                                && $this->canParticipantEditProposedDate($participant, $date),
+                            'canEditTime' => $participant instanceof Participant
                                 && $this->canParticipantEditProposedDate($participant, $date),
                             'yesCount' => $yesCount,
                             'maybeCount' => $maybeCount,
@@ -649,6 +739,10 @@ class PokerSchedulingService
             'personalUrl' => $participant
                 ? route('home', ['token' => $participant->token])
                 : null,
+            'availableGames' => $this->availableGames(),
+            'participantGamePreferences' => $participant instanceof Participant
+                ? $participant->gamePreferences->pluck('id')->all()
+                : [],
         ];
     }
 
@@ -664,13 +758,12 @@ class PokerSchedulingService
         return [
             'id' => $date->id,
             'startsAt' => $date->starts_at->toIso8601String(),
-            'label' => $date->starts_at
-                ->locale('fr')
-                ->translatedFormat('l j F Y \à H\hi'),
+            'label' => $this->humanDateLabel($date->starts_at),
             'location' => $date->location,
             'theme' => $date->theme,
             'beginnersWelcome' => $date->beginners_welcome,
             'note' => $date->note,
+            'games' => $date->games->map(fn (Game $g): array => $this->gamePayload($g))->values()->all(),
             'myVote' => $participantVotes->get($date->id)?->value,
             'canEditLocation' => $participant instanceof Participant
                 && $this->canParticipantEditProposedDate($participant, $date),
@@ -697,5 +790,28 @@ class PokerSchedulingService
             ->sort()
             ->values()
             ->all();
+    }
+
+    /**
+     * @return array{id: int, name: string, slug: string, icon: string|null}
+     */
+    private function gamePayload(Game $game): array
+    {
+        return [
+            'id' => $game->id,
+            'name' => $game->name,
+            'slug' => $game->slug,
+            'icon' => $game->icon,
+        ];
+    }
+
+    private function humanDateLabel(CarbonInterface $startsAt): string
+    {
+        $datePart = $startsAt->locale('fr')->translatedFormat('l j F');
+        $timePart = $startsAt->minute === 0
+            ? $startsAt->format('G').'h'
+            : $startsAt->format('G').'h'.$startsAt->format('i');
+
+        return 'le '.$datePart.' à '.$timePart;
     }
 }

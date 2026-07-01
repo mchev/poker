@@ -36,7 +36,7 @@ test('proposed dates keep the local time entered in the form', function () {
     $label = app(PokerSchedulingService::class)
         ->pageData($participant)['round']['dates'][0]['label'];
 
-    expect($label)->toBe('vendredi 18 septembre 2026 à 18h00');
+    expect($label)->toBe('le vendredi 18 septembre à 18h');
 });
 
 test('dates are formatted in french', function () {
@@ -51,7 +51,7 @@ test('dates are formatted in french', function () {
 
     $data = app(PokerSchedulingService::class)->pageData(null);
 
-    expect($data['round']['dates'][0]['label'])->toBe('vendredi 12 juin 2026 à 20h00');
+    expect($data['round']['dates'][0]['label'])->toBe('le vendredi 12 juin à 20h');
 });
 
 test('home page renders poker scheduling screen', function () {
@@ -94,7 +94,7 @@ test('history page renders completed poker nights without exposing emails', func
         ->assertInertia(fn ($page) => $page
             ->component('Poker/History')
             ->has('pastNights', 1)
-            ->where('pastNights.0.label', 'dimanche 15 mars 2026 à 20h00')
+            ->where('pastNights.0.label', 'le dimanche 15 mars à 20h')
             ->where('pastNights.0.attendees', [['id' => $attending->id, 'name' => 'Alex']])
             ->missing('pastNights.0.declinedNames')
             ->missing('pastNights.0.attendees.0.email'));

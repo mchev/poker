@@ -57,6 +57,18 @@ export function daysUntilLabel(startsAt: string): string {
     return `Dans ${diffDays} jours`;
 }
 
+export function formatGameList(games: { name: string }[]): string {
+    if (games.length === 0) return '';
+    if (games.length === 1) return games[0].name;
+    if (games.length === 2) return `${games[0].name} et ${games[1].name}`;
+
+    return games
+        .slice(0, -1)
+        .map((g) => g.name)
+        .join(', ')
+        .concat(` et ${games[games.length - 1].name}`);
+}
+
 export function minDateForInput(): string {
     const tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);

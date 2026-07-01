@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 #[Fillable(['scheduling_round_id', 'starts_at', 'location', 'theme', 'beginners_welcome', 'note', 'confirmed_at', 'vote_reminder_sent_at', 'proposed_by_participant_id', 'winner_participant_id'])]
@@ -63,5 +64,13 @@ class ProposedDate extends Model
     public function votes(): HasMany
     {
         return $this->hasMany(Vote::class);
+    }
+
+    /**
+     * @return BelongsToMany<Game, $this>
+     */
+    public function games(): BelongsToMany
+    {
+        return $this->belongsToMany(Game::class, 'game_proposed_date');
     }
 }

@@ -43,6 +43,9 @@ class NewProposedDateMail extends Mailable implements ShouldQueue
                 'location' => $this->proposedDate->location,
                 'theme' => $this->proposedDate->theme,
                 'beginnersWelcome' => $this->proposedDate->beginners_welcome,
+                'games' => $this->proposedDate->relationLoaded('games')
+                    ? $this->proposedDate->games->pluck('name')->all()
+                    : [],
                 'url' => route('home', ['token' => $this->participant->token]),
             ],
         );

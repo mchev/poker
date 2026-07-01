@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { Form } from '@inertiajs/vue3';
 import { CalendarPlus, Check, Mail, Pencil, Trash2, X } from 'lucide-vue-next';
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import PokerController from '@/actions/App/Http/Controllers/PokerController';
 import PokerLocationFields from '@/components/poker/PokerLocationFields.vue';
 import PokerNameList from '@/components/poker/PokerNameList.vue';
@@ -11,16 +11,26 @@ import { Button } from '@/components/ui/button';
 import {
     casinoChipNeutral,
     casinoChipPrimary,
+    formatGameList,
     pokerPanel,
     voteOptionHint,
 } from '@/lib/pokerUi';
 
+type Game = {
+    id: number;
+    name: string;
+    slug: string;
+    icon: string | null;
+};
+
 type PollDate = {
     id: number;
+    startsAt: string;
     label: string;
     location: string | null;
     theme: string | null;
     beginnersWelcome: boolean;
+    games: Game[];
     yesCount: number;
     maybeCount: number;
     yesNames: string[];
@@ -30,6 +40,7 @@ type PollDate = {
     myVote: string | null;
     canDelete: boolean;
     canEditLocation: boolean;
+    canEditTime: boolean;
     canRemindNonVoters: boolean;
     nonVoterCount: number;
 };
@@ -43,6 +54,7 @@ const props = defineProps<{
     isDeleting: boolean;
     isEditingLocation: boolean;
     editLocationType: string;
+    isEditingTime: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -51,12 +63,29 @@ const emit = defineEmits<{
     toggleLocationEdit: [];
     'update:editLocationType': [value: string];
     locationEditSuccess: [];
+    toggleTimeEdit: [];
+    timeEditSuccess: [];
 }>();
 
 const editLocationTypeModel = computed({
     get: () => props.editLocationType,
     set: (value: string) => emit('update:editLocationType', value),
 });
+
+const currentDateValue = computed(() => {
+    const d = new Date(props.date.startsAt);
+
+    return d.toISOString().slice(0, 10);
+});
+
+const currentTimeValue = computed(() => {
+    const d = new Date(props.date.startsAt);
+
+    return d.toISOString().slice(11, 16);
+});
+
+const editDate = ref(currentDateValue.value);
+const editTime = ref(currentTimeValue.value);
 
 const voteOptions = [
     {
@@ -92,78 +121,89 @@ const voteOptions = [
                 : pokerPanel
         "
     >
-        <div class="mb-4 flex flex-wrap items-start justify-between gap-3">
-            <div class="min-w-0 flex-1">
-                <p class="font-semibold text-white">{{ date.label }}</p>
-                <div
-                    class="mt-2 flex flex-wrap items-center gap-2 text-sm text-white/70"
-                >
-                    <span v-if="date.location">{{ date.location }}</span>
-                                    <Badge
-                                        v-if="date.theme"
-                                        class="border border-white/10 bg-white/5 text-white/75 hover:bg-white/5"
-                                    >
-                                        {{ date.theme }}
-                                    </Badge>
-                                    <Badge
-                                        v-if="date.beginnersWelcome"
-                                        class="border border-sky-400/30 bg-sky-500/10 text-sky-100 hover:bg-sky-500/10"
-                                    >
-                                        Débutant·e·s OK
-                                    </Badge>
-                                </div>
-                <div class="mt-3 max-w-sm">
-                    <PokerThresholdProgress
-                        :yes-count="date.yesCount"
-                        :threshold="threshold"
-                    />
-                </div>
-            </div>
-            <div class="flex items-center gap-2">
-                <Badge
-                    v-if="date.reachedThreshold"
-                    class="border border-amber-400/30 bg-amber-500/10 text-amber-100 hover:bg-amber-500/10"
-                >
-                    Seuil atteint
-                </Badge>
+        <div class="mb-2 flex flex-wrap items-start justify-between gap-2">
+            <h3 class="min-w-0 flex-1 font-serif text-lg font-semibold leading-tight text-white">
+                ♠ Soirée{{ date.games.length > 0 ? ' ' + formatGameList(date.games) : '' }}
+                {{ date.label }}{{ date.location ? ' — ' + date.location : '' }}
+            </h3>
+            <Badge
+                v-if="date.reachedThreshold"
+                class="shrink-0 border border-amber-400/30 bg-amber-500/10 text-amber-100 hover:bg-amber-500/10"
+            >
+                Seuil atteint
+            </Badge>
+        </div>
+
+        <div v-if="date.theme || date.beginnersWelcome" class="mb-2 mt-1 flex flex-wrap items-center gap-2 text-sm text-white/70">
+            <Badge
+                v-if="date.theme"
+                class="border border-white/10 bg-white/5 text-white/75 hover:bg-white/5"
+            >
+                {{ date.theme }}
+            </Badge>
+            <Badge
+                v-if="date.beginnersWelcome"
+                class="border border-sky-400/30 bg-sky-500/10 text-sky-100 hover:bg-sky-500/10"
+            >
+                Débutant·e·s OK
+            </Badge>
+        </div>
+
+        <div class="mb-2 flex flex-wrap items-center gap-2">
+            <Button
+                v-if="date.canEditLocation"
+                type="button"
+                variant="ghost"
+                class="h-8 border border-white/10 bg-black/30 px-2.5 text-xs text-white/60 hover:bg-white/5 hover:text-white"
+                @click="emit('toggleLocationEdit')"
+            >
+                <Pencil class="mr-1 size-3" />
+                {{ isEditingLocation ? 'Annuler' : 'Lieu' }}
+            </Button>
+            <Button
+                v-if="date.canEditTime"
+                type="button"
+                variant="ghost"
+                class="h-8 border border-white/10 bg-black/30 px-2.5 text-xs text-white/60 hover:bg-white/5 hover:text-white"
+                @click="emit('toggleTimeEdit')"
+            >
+                <Pencil class="mr-1 size-3" />
+                {{ isEditingTime ? 'Annuler' : 'Horaire' }}
+            </Button>
+            <Form
+                v-if="date.canRemindNonVoters"
+                v-bind="PokerController.remindNonVoters.form(date.id)"
+                class="contents"
+                v-slot="{ processing }"
+            >
                 <Button
-                    v-if="date.canEditLocation"
-                    type="button"
+                    type="submit"
                     variant="ghost"
-                    class="h-9 border border-white/10 bg-black/30 px-3 text-white/60 hover:bg-white/5 hover:text-white"
-                    @click="emit('toggleLocationEdit')"
+                    class="h-8 border border-white/10 bg-black/30 px-2.5 text-xs text-white/60 hover:bg-sky-500/10 hover:text-sky-100"
+                    :disabled="processing"
                 >
-                    <Pencil class="mr-1.5 size-4" />
-                    {{ isEditingLocation ? 'Annuler' : 'Lieu' }}
+                    <Mail class="mr-1 size-3" />
+                    Relancer ({{ date.nonVoterCount }})
                 </Button>
-                <Form
-                    v-if="date.canRemindNonVoters"
-                    v-bind="PokerController.remindNonVoters.form(date.id)"
-                    class="contents"
-                    v-slot="{ processing }"
-                >
-                    <Button
-                        type="submit"
-                        variant="ghost"
-                        class="h-9 border border-white/10 bg-black/30 px-3 text-white/60 hover:bg-sky-500/10 hover:text-sky-100"
-                        :disabled="processing"
-                    >
-                        <Mail class="mr-1.5 size-4" />
-                        Relancer ({{ date.nonVoterCount }})
-                    </Button>
-                </Form>
-                <Button
-                    v-if="date.canDelete"
-                    type="button"
-                    variant="ghost"
-                    class="h-9 border border-white/10 bg-black/30 px-3 text-white/60 hover:bg-rose-500/10 hover:text-rose-100"
-                    :disabled="isDeleting"
-                    @click="emit('delete')"
-                >
-                    <Trash2 class="mr-1.5 size-4" />
-                    Supprimer
-                </Button>
-            </div>
+            </Form>
+            <Button
+                v-if="date.canDelete"
+                type="button"
+                variant="ghost"
+                class="h-8 border border-white/10 bg-black/30 px-2.5 text-xs text-white/60 hover:bg-rose-500/10 hover:text-rose-100"
+                :disabled="isDeleting"
+                @click="emit('delete')"
+            >
+                <Trash2 class="mr-1 size-3" />
+                Supprimer
+            </Button>
+        </div>
+
+        <div class="mb-3 max-w-sm">
+            <PokerThresholdProgress
+                :yes-count="date.yesCount"
+                :threshold="threshold"
+            />
         </div>
 
         <Form
@@ -187,6 +227,53 @@ const voteOptions = [
             >
                 Enregistrer le lieu
             </Button>
+        </Form>
+
+        <Form
+            v-if="date.canEditTime && isEditingTime"
+            v-bind="PokerController.updateProposedDate.form(date.id)"
+            class="mb-4 space-y-3 rounded-xl border border-white/10 bg-black/35 p-4"
+            v-slot="{ errors, processing }"
+            @success="emit('timeEditSuccess')"
+        >
+            <input type="hidden" name="date" :value="editDate" />
+            <input type="hidden" name="time" :value="editTime" />
+            <div class="flex items-end gap-3">
+                <div class="flex-1">
+                    <label
+                        class="mb-1 block text-xs font-medium text-white/70"
+                    >
+                        Date
+                    </label>
+                    <input
+                        type="date"
+                        :value="editDate"
+                        @input="editDate = ($event.target as HTMLInputElement).value"
+                        class="w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white outline-none focus:border-amber-400/50"
+                    />
+                </div>
+                <div class="w-28">
+                    <label
+                        class="mb-1 block text-xs font-medium text-white/70"
+                    >
+                        Heure
+                    </label>
+                    <input
+                        type="time"
+                        :value="editTime"
+                        @input="editTime = ($event.target as HTMLInputElement).value"
+                        class="w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white outline-none focus:border-amber-400/50"
+                    />
+                </div>
+                <Button
+                    type="submit"
+                    class="h-11 shrink-0 font-semibold"
+                    :class="casinoChipPrimary"
+                    :disabled="processing"
+                >
+                    Enregistrer
+                </Button>
+            </div>
         </Form>
 
         <div class="mb-4 grid gap-2 text-sm sm:grid-cols-3">

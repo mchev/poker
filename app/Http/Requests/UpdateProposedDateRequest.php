@@ -18,7 +18,7 @@ class UpdateProposedDateRequest extends PokerFormRequest
             return false;
         }
 
-        if (! $this->has('location_type') && ! $this->has('note')) {
+        if (! $this->has('location_type') && ! $this->has('note') && ! $this->has('date')) {
             return false;
         }
 
@@ -56,6 +56,16 @@ class UpdateProposedDateRequest extends PokerFormRequest
             $rules['note'] = ['nullable', 'string', 'max:500'];
         }
 
+        if ($this->has('game_ids')) {
+            $rules['game_ids'] = ['nullable', 'array'];
+            $rules['game_ids.*'] = ['integer', 'exists:games,id'];
+        }
+
+        if ($this->has('date')) {
+            $rules['date'] = ['required', 'date_format:Y-m-d'];
+            $rules['time'] = ['required', 'date_format:H:i'];
+        }
+
         return $rules;
     }
 
@@ -79,6 +89,10 @@ class UpdateProposedDateRequest extends PokerFormRequest
     {
         return array_merge(ProposedDateLocation::messages(), [
             'note.max' => 'La note doit faire moins de 500 caractères.',
+            'date.required' => 'La date est obligatoire.',
+            'date.date_format' => 'Le format de la date n\'est pas valide.',
+            'time.required' => 'L\'heure est obligatoire.',
+            'time.date_format' => 'Le format de l\'heure n\'est pas valide.',
         ]);
     }
 }

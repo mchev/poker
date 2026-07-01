@@ -74,6 +74,10 @@ final class ProposedDateCalendar
                 ->translatedFormat('l j F Y \à H\hi'),
         ];
 
+        if ($date->relationLoaded('games') && $date->games->isNotEmpty()) {
+            $parts[] = 'Jeux : '.$date->games->pluck('name')->implode(', ');
+        }
+
         if ($date->beginners_welcome) {
             $parts[] = 'Débutant·e·s les bienvenu·e·s.';
         }

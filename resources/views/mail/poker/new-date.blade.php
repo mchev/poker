@@ -13,6 +13,10 @@
 **Thème :** {{ $theme }}
 @endif
 
+@if (filled($games))
+**Jeux :** {{ implode(', ', $games) }}
+@endif
+
 @if ($beginnersWelcome)
 **Débutant·e·s :** les bienvenu·e·s sont accepté·e·s sur ce créneau.
 @endif

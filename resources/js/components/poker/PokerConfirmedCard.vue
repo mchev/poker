@@ -19,12 +19,20 @@ import { Label } from '@/components/ui/label';
 import {
     casinoChipPrimary,
     daysUntilLabel,
+    formatGameList,
     myVoteLabels,
     pokerCard,
     pokerHeader,
     pokerInput,
     pokerMuted,
 } from '@/lib/pokerUi';
+
+type Game = {
+    id: number;
+    name: string;
+    slug: string;
+    icon: string | null;
+};
 
 type ConfirmedDate = {
     id: number;
@@ -33,6 +41,7 @@ type ConfirmedDate = {
     location: string | null;
     theme: string | null;
     beginnersWelcome: boolean;
+    games: Game[];
     note: string | null;
     myVote: 'yes' | 'no' | 'maybe' | null;
     attendingCount: number;
@@ -100,20 +109,10 @@ const editLocationTypeModel = computed({
                     {{ myVoteLabels[confirmedDate.myVote] ?? confirmedDate.myVote }}
                 </Badge>
             </div>
-            <CardTitle class="font-serif text-3xl text-white">
-                {{ confirmedDate.label }}
+            <CardTitle class="font-serif text-2xl text-white">
+                ♠ Soirée{{ confirmedDate.games.length > 0 ? ' ' + formatGameList(confirmedDate.games) : '' }}
+                {{ confirmedDate.label }}{{ confirmedDate.location ? ' — ' + confirmedDate.location : '' }}
             </CardTitle>
-            <CardDescription :class="['text-base', pokerMuted]">
-                <span v-if="confirmedDate.location">
-                    {{ confirmedDate.location }}
-                    <span v-if="confirmedDate.theme">
-                        · {{ confirmedDate.theme }}
-                    </span>
-                </span>
-                <span v-else-if="confirmedDate.theme">{{
-                    confirmedDate.theme
-                }}</span>
-            </CardDescription>
             <p
                 v-if="confirmedDate.note"
                 class="mt-2 rounded-lg border border-white/10 bg-black/35 px-3 py-2 text-sm text-white/85"

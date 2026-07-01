@@ -4,6 +4,7 @@ namespace Database\Seeders;
 
 use App\Enums\Availability;
 use App\Enums\SchedulingRoundStatus;
+use App\Models\Game;
 use App\Models\Participant;
 use App\Models\ProposedDate;
 use App\Models\SchedulingRound;
@@ -24,6 +25,7 @@ class PokerDemoSeeder extends Seeder
         }
 
         $this->wipePokerData();
+        $this->seedGames();
 
         $participants = $this->createParticipants();
         $martin = $participants['Martin'];
@@ -93,6 +95,24 @@ class PokerDemoSeeder extends Seeder
         return $participants;
     }
 
+    private function seedGames(): void
+    {
+        $games = [
+            ['name' => 'Poker', 'slug' => 'poker', 'icon' => '🃏'],
+            ['name' => 'Flechettes', 'slug' => 'flechettes', 'icon' => '🎯'],
+            ['name' => 'Billard', 'slug' => 'billard', 'icon' => '🎱'],
+            ['name' => 'Palet breton', 'slug' => 'palet-breton', 'icon' => '🎯'],
+            ['name' => 'Échecs', 'slug' => 'echecs', 'icon' => '♟️'],
+        ];
+
+        foreach ($games as $game) {
+            Game::query()->firstOrCreate(
+                ['slug' => $game['slug']],
+                $game,
+            );
+        }
+    }
+
     /**
      * @param  array<string, Participant>  $participants
      */
@@ -116,6 +136,7 @@ class PokerDemoSeeder extends Seeder
         $round->update(['confirmed_proposed_date_id' => $pastDate->id]);
 
         $pastDate->update(['winner_participant_id' => $participants['Julien']->id]);
+        $pastDate->games()->sync(Game::whereIn('slug', ['poker', 'flechettes'])->pluck('id'));
 
         foreach (['Alex', 'Marie', 'Julien', 'Camille', 'Thomas', 'Léa'] as $name) {
             $this->vote($participants[$name], $pastDate, Availability::Yes);
@@ -158,6 +179,8 @@ class PokerDemoSeeder extends Seeder
         ]);
 
         $round->update(['confirmed_proposed_date_id' => $confirmedPopular->id]);
+        $confirmedPopular->games()->sync(Game::whereIn('slug', ['poker', 'flechettes'])->pluck('id'));
+        $confirmedSmall->games()->sync(Game::whereIn('slug', ['poker', 'echecs'])->pluck('id'));
 
         foreach (['Martin', 'Alex', 'Marie', 'Julien', 'Camille', 'Thomas', 'Nicolas'] as $name) {
             $this->vote($participants[$name], $confirmedPopular, Availability::Yes);
@@ -180,6 +203,8 @@ class PokerDemoSeeder extends Seeder
             'proposed_by_participant_id' => $participants['Marie']->id,
         ]);
 
+        $pollAlmost->games()->sync(Game::whereIn('slug', ['poker', 'billard'])->pluck('id'));
+
         foreach (['Martin', 'Marie', 'Julien'] as $name) {
             $this->vote($participants[$name], $pollAlmost, Availability::Yes);
         }
@@ -196,6 +221,8 @@ class PokerDemoSeeder extends Seeder
             'beginners_welcome' => true,
             'proposed_by_participant_id' => $participants['Léa']->id,
         ]);
+
+        $pollBeginners->games()->sync(Game::whereIn('slug', ['poker', 'palet-breton'])->pluck('id'));
 
         $this->vote($participants['Léa'], $pollBeginners, Availability::Yes);
         $this->vote($participants['Chloé'], $pollBeginners, Availability::Maybe);

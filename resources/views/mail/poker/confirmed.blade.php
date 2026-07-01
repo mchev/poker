@@ -22,6 +22,10 @@ Bonne nouvelle : **{{ count($dates) }} soirées viennent d’être calées**.
 **Thème :** {{ $date['theme'] }}
 @endif
 
+@if (filled($date['games']))
+**Jeux :** {{ implode(', ', $date['games']) }}
+@endif
+
 @if ($date['beginnersWelcome'])
 **Débutant·e·s :** les bienvenu·e·s sont accepté·e·s sur ce créneau.
 @endif

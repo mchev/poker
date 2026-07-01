@@ -48,6 +48,9 @@ class VoteReminderMail extends Mailable implements ShouldQueue
                 'location' => $this->proposedDate->location,
                 'theme' => $this->proposedDate->theme,
                 'beginnersWelcome' => $this->proposedDate->beginners_welcome,
+                'games' => $this->proposedDate->relationLoaded('games')
+                    ? $this->proposedDate->games->pluck('name')->all()
+                    : [],
                 'yesCount' => $this->yesCount,
                 'threshold' => $this->threshold,
                 'missingCount' => $missing,

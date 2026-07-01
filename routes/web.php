@@ -11,6 +11,7 @@ Route::get('/robots.txt', fn () => response("User-agent: *\nDisallow: /\n", 200,
 Route::middleware(ResolvePokerParticipant::class)->group(function (): void {
     Route::get('/', [PokerController::class, 'index'])->name('home');
     Route::get('/historique', [PokerController::class, 'history'])->name('poker.history');
+    Route::get('/admin', [PokerController::class, 'admin'])->name('poker.admin');
     Route::patch('/historique/dates/{proposedDate}/gagnant', [PokerController::class, 'updatePastNightWinner'])
         ->middleware('throttle:30,1')
         ->name('poker.history.winner.update');
@@ -25,6 +26,9 @@ Route::middleware(ResolvePokerParticipant::class)->group(function (): void {
     Route::patch('/profil', [PokerController::class, 'updateProfile'])
         ->middleware('throttle:20,1')
         ->name('poker.profile.update');
+    Route::patch('/profil/jeux', [PokerController::class, 'updateGamePreferences'])
+        ->middleware('throttle:20,1')
+        ->name('poker.profile.games.update');
     Route::post('/votes', [PokerController::class, 'storeVotes'])
         ->middleware('throttle:30,1')
         ->name('poker.votes.store');

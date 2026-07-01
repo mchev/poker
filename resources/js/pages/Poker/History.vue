@@ -12,12 +12,20 @@ import {
     CardTitle,
 } from '@/components/ui/card';
 import {
+    formatGameList,
     pokerCard,
     pokerHeader,
     pokerMuted,
     pokerPanel,
 } from '@/lib/pokerUi';
 import { home } from '@/routes';
+
+type Game = {
+    id: number;
+    name: string;
+    slug: string;
+    icon: string | null;
+};
 
 type Attendee = {
     id: number;
@@ -31,6 +39,7 @@ type PastNight = {
     location: string | null;
     theme: string | null;
     beginnersWelcome: boolean;
+    games: Game[];
     note: string | null;
     attendingCount: number;
     attendees: Attendee[];
@@ -114,7 +123,8 @@ function toggleWinner(night: PastNight, attendeeId: number): void {
                 >
                     <div class="flex flex-wrap items-start justify-between gap-3">
                         <h2 class="font-serif text-xl font-semibold text-white">
-                            {{ night.label }}
+                            ♠ Soirée{{ night.games.length > 0 ? ' ' + formatGameList(night.games) : '' }}
+                            {{ night.label }}{{ night.location ? ' — ' + night.location : '' }}
                         </h2>
                         <p
                             class="font-serif text-3xl font-bold tabular-nums text-amber-300"
@@ -129,9 +139,6 @@ function toggleWinner(night: PastNight, attendeeId: number): void {
                     <div
                         class="mt-2 flex flex-wrap items-center gap-2 text-sm text-white/70"
                     >
-                        <span v-if="night.location">
-                            {{ night.location }}
-                        </span>
                         <Badge
                             v-if="night.theme"
                             class="border border-white/10 bg-white/5 text-white/75 hover:bg-white/5"

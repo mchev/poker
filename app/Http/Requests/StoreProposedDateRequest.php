@@ -30,6 +30,8 @@ class StoreProposedDateRequest extends PokerFormRequest
             'time' => ['required', 'date_format:H:i'],
             'theme' => ['nullable', 'string', 'max:80'],
             'beginners_welcome' => ['boolean'],
+            'game_ids' => ['nullable', 'array'],
+            'game_ids.*' => ['integer', 'exists:games,id'],
         ], ProposedDateLocation::rules());
     }
 

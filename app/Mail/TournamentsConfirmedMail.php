@@ -53,7 +53,7 @@ class TournamentsConfirmedMail extends Mailable implements ShouldQueue
     }
 
     /**
-     * @return array{label: string, location: string|null, theme: string|null, beginnersWelcome: bool}
+     * @return array{label: string, location: string|null, theme: string|null, beginnersWelcome: bool, games: list<string>}
      */
     private function dateSummary(ProposedDate $date): array
     {
@@ -64,6 +64,9 @@ class TournamentsConfirmedMail extends Mailable implements ShouldQueue
             'location' => $date->location ?: config('poker.location'),
             'theme' => $date->theme,
             'beginnersWelcome' => $date->beginners_welcome,
+            'games' => $date->relationLoaded('games')
+                ? $date->games->pluck('name')->all()
+                : [],
         ];
     }
 }
