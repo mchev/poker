@@ -355,6 +355,24 @@ class PokerController extends Controller
         ]);
     }
 
+    public function adminStoreGame(Request $request): RedirectResponse
+    {
+        $this->ensurePokerAdmin($request);
+
+        $validated = $request->validate([
+            'name' => ['required', 'string', 'max:255'],
+            'slug' => ['required', 'string', 'max:255', 'alpha_dash', 'unique:games,slug'],
+            'icon' => ['nullable', 'string', 'max:50'],
+        ]);
+
+        $this->scheduling->createGame($validated['name'], $validated['slug'], $validated['icon'] ?? null);
+
+        return back()->with('toast', [
+            'type' => 'success',
+            'message' => "Jeu « {$validated['name']} » ajouté.",
+        ]);
+    }
+
     public function logout(Request $request): RedirectResponse
     {
         return redirect()

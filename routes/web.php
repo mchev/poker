@@ -61,6 +61,9 @@ Route::middleware(ResolvePokerParticipant::class)->group(function (): void {
     Route::post('/admin/participants/{participant}/renvoyer-lien', [PokerController::class, 'adminResendAccessLinkToParticipant'])
         ->middleware('throttle:20,1')
         ->name('poker.admin.participants.access.resend');
+    Route::post('/admin/jeux', [PokerController::class, 'adminStoreGame'])
+        ->middleware('throttle:20,1')
+        ->name('poker.admin.games.store');
     Route::delete('/admin/participants/{participant}', [PokerController::class, 'adminDestroyParticipant'])
         ->middleware('throttle:20,1')
         ->name('poker.admin.participants.destroy');

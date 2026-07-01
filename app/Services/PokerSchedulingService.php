@@ -620,9 +620,18 @@ class PokerSchedulingService
                     ])
                     ->all()
                 : [],
+            'availableGames' => $this->availableGames(),
             'hasConfirmedDates' => $round->proposedDates()->whereNotNull('confirmed_at')->exists(),
             'subscribedCount' => Participant::query()->count(),
         ];
+    }
+
+    public function createGame(string $name, string $slug, ?string $icon): Game
+    {
+        return Game::query()->firstOrCreate(
+            ['slug' => $slug],
+            compact('name', 'slug', 'icon'),
+        );
     }
 
     public function setPastNightWinner(ProposedDate $proposedDate, ?int $winnerParticipantId): ProposedDate

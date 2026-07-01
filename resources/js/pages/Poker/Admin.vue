@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { Form, Head, Link, router } from '@inertiajs/vue3';
-import { ArrowLeft, Mail, RefreshCw, Shield, Trash2, Users } from 'lucide-vue-next';
+import { Form, Head, Link, router, useForm } from '@inertiajs/vue3';
+import { ArrowLeft, Gamepad2, Mail, Plus, RefreshCw, Shield, Trash2 } from 'lucide-vue-next';
 import { ref } from 'vue';
 import { toast } from 'vue-sonner';
 import PokerController from '@/actions/App/Http/Controllers/PokerController';
@@ -12,6 +12,9 @@ import {
     CardHeader,
     CardTitle,
 } from '@/components/ui/card';
+import {
+    Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import {
     casinoChipPrimary,
     pokerCard,
@@ -27,9 +30,17 @@ type AdminParticipant = {
     email: string;
 };
 
+type Game = {
+    id: number;
+    name: string;
+    slug: string;
+    icon: string | null;
+};
+
 const props = defineProps<{
     participant: { id: number; name: string; isAdmin: boolean } | null;
     adminParticipants: AdminParticipant[];
+    availableGames: Game[];
     hasConfirmedDates: boolean;
     subscribedCount: number;
 }>();
@@ -61,6 +72,12 @@ function deleteParticipant(participant: AdminParticipant): void {
         },
     );
 }
+
+const gameForm = useForm({
+    name: '',
+    slug: '',
+    icon: '',
+});
 </script>
 
 <template>
@@ -188,6 +205,124 @@ function deleteParticipant(participant: AdminParticipant): void {
                             </Button>
                         </div>
                     </div>
+                </div>
+            </CardContent>
+        </Card>
+
+        <Card :class="pokerCard">
+            <CardHeader :class="pokerHeader">
+                <div class="flex items-center gap-2 text-sky-300">
+                    <Gamepad2 class="size-5" />
+                    <span class="text-sm font-semibold uppercase tracking-wider"
+                        >Jeux</span
+                    >
+                </div>
+                <CardTitle class="font-serif text-2xl text-white">
+                    Gestion des jeux
+                </CardTitle>
+                <CardDescription :class="['text-base', pokerMuted]">
+                    {{ availableGames.length }} jeu{{ availableGames.length > 1 ? 'x' : '' }}
+                    disponibles — ajoutez-en de nouveaux.
+                </CardDescription>
+            </CardHeader>
+            <CardContent class="space-y-4 px-6 pt-6 pb-6">
+                <div class="flex flex-wrap gap-2">
+                    <span
+                        v-for="game in availableGames"
+                        :key="game.id"
+                        class="inline-flex items-center gap-1.5 rounded-lg border border-white/10 bg-black/30 px-3 py-1.5 text-sm text-white/80"
+                    >
+                        <span v-if="game.icon">{{ game.icon }}</span>
+                        {{ game.name }}
+                        <span class="text-[11px] text-white/40">({{ game.slug }})</span>
+                    </span>
+                </div>
+
+                <div class="border-t border-white/5 pt-4">
+                    <p class="mb-3 text-sm font-medium text-white/75">
+                        Ajouter un jeu
+                    </p>
+                    <form
+                        @submit.prevent="
+                            gameForm.post(PokerController.adminStoreGame.url(), {
+                                preserveScroll: true,
+                                onSuccess: () => {
+                                    gameForm.reset();
+                                    toast.success('Jeu ajouté');
+                                },
+                            })
+                        "
+                        class="flex flex-wrap items-end gap-3"
+                    >
+                        <div class="space-y-1.5">
+                            <Label
+                                for="game-name"
+                                class="text-xs text-white/60"
+                            >
+                                Nom
+                            </Label>
+                            <Input
+                                id="game-name"
+                                v-model="gameForm.name"
+                                type="text"
+                                placeholder="Poker"
+                                class="h-9 border-white/10 bg-black/30 text-sm text-white placeholder:text-white/30"
+                                required
+                            />
+                            <p
+                                v-if="gameForm.errors.name"
+                                class="text-xs text-rose-300"
+                            >
+                                {{ gameForm.errors.name }}
+                            </p>
+                        </div>
+                        <div class="space-y-1.5">
+                            <Label
+                                for="game-slug"
+                                class="text-xs text-white/60"
+                            >
+                                Slug
+                            </Label>
+                            <Input
+                                id="game-slug"
+                                v-model="gameForm.slug"
+                                type="text"
+                                placeholder="poker"
+                                class="h-9 border-white/10 bg-black/30 text-sm text-white placeholder:text-white/30"
+                                required
+                            />
+                            <p
+                                v-if="gameForm.errors.slug"
+                                class="text-xs text-rose-300"
+                            >
+                                {{ gameForm.errors.slug }}
+                            </p>
+                        </div>
+                        <div class="space-y-1.5">
+                            <Label
+                                for="game-icon"
+                                class="text-xs text-white/60"
+                            >
+                                Icône
+                            </Label>
+                            <Input
+                                id="game-icon"
+                                v-model="gameForm.icon"
+                                type="text"
+                                placeholder="🃏"
+                                class="h-9 w-16 border-white/10 bg-black/30 text-sm text-white placeholder:text-white/30"
+                            />
+                        </div>
+                        <Button
+                            type="submit"
+                            variant="outline"
+                            class="h-9 border-white/10 bg-black/35 px-3 text-xs text-white/80 hover:bg-white/5 hover:text-white"
+                            :disabled="gameForm.processing"
+                        >
+                            <Plus class="mr-1.5 size-3.5" />
+                            Ajouter
+                        </Button>
+                    </form>
                 </div>
             </CardContent>
         </Card>
